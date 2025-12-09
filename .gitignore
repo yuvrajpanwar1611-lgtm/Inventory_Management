@@ -1,0 +1,17 @@
+# Python
+venv/
+__pycache__/
+*.pyc
+.env
+
+# React / Node
+node_modules/
+build/
+dist/
+
+# Generated PDFs
+invoices/
+
+# OS
+.DS_Store
+Thumbs.db
