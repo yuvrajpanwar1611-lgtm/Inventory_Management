@@ -1053,6 +1053,58 @@ def register_user(data: RegisterRequest):
 
 # email_otp_store = {}
 
+
+# from random import randint
+
+# @app.post("/send-email-otp")
+# async def send_email_otp(email: str):
+#     if not MAIL_CONF:
+#         raise HTTPException(500, "Email server not configured")
+
+#     otp = randint(100000, 999999)
+#     email_otp_store[email] = otp
+
+#     fm = FastMail(MAIL_CONF)
+
+#     html = f"""
+#     <h3>Your Email Verification OTP</h3>
+#     <p>Your OTP is: <strong>{otp}</strong></p>
+#     <p>This OTP will expire in 5 minutes.</p>
+#     """
+
+#     message = MessageSchema(
+#         subject="Email OTP Verification",
+#         recipients=[email],
+#         body=html,
+#         subtype="html"
+#     )
+
+#     try:
+#         await fm.send_message(message)
+#     except Exception as e:
+#         print("Email error:", e)
+#         raise HTTPException(500, "Failed to send OTP email")
+
+#     return {"status": "ok", "message": "OTP sent to email"}
+
+
+
+# @app.post("/verify-email-otp")
+# async def verify_email_otp(email: str, otp: int):
+#     real_otp = email_otp_store.get(email)
+
+#     if not real_otp:
+#         raise HTTPException(400, "OTP expired or not found")
+
+#     if real_otp != otp:
+#         raise HTTPException(400, "Invalid OTP")
+
+#     # OTP is correct — remove it
+#     del email_otp_store[email]
+
+#     return {"status": "ok", "verified": True}
+email_otp_store = {}
+
 STATIC_OTP = 123456   # <<----- Your fixed OTP
 
 
