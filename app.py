@@ -58,10 +58,7 @@ def home():
 
 # EMAIL CONFIG 
 EMAIL = "yuvrajpanwar1611@gmail.com"
-PASS = "lptv mcsn lhlb ogle"
-
-if not EMAIL or not PASS:
-    raise Exception("❌ EMAIL or PASS not found in .env — Email sending cannot work!")
+PASS = "lptvmcsnlhlbogle"  # remove spaces
 
 MAIL_CONF = ConnectionConfig(
     MAIL_USERNAME=EMAIL,
@@ -74,6 +71,7 @@ MAIL_CONF = ConnectionConfig(
     USE_CREDENTIALS=True,
     VALIDATE_CERTS=True
 )
+
 
 
 #################   AUTH CONFIG (JWT)   ###########################
