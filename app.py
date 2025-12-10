@@ -259,6 +259,9 @@ from reportlab.lib.units import mm
 import textwrap, os, qrcode
 from decimal import Decimal
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+INVOICE_DIR = os.path.join(BASE_DIR, "invoices")
+
 
 def get_field(obj, field):
     """Safely fetch field from dict or pydantic model."""
@@ -268,8 +271,10 @@ def get_field(obj, field):
 
 
 def generate_invoice_pdf_multi(invoice_number, items, grand_total, data, timestamp):
-    os.makedirs("invoices", exist_ok=True)
-    file_path = f"invoices/{invoice_number}.pdf"
+
+    # 🔥 FIXED: Works on Render using ABSOLUTE PATH
+    os.makedirs(INVOICE_DIR, exist_ok=True)
+    file_path = os.path.join(INVOICE_DIR, f"{invoice_number}.pdf")
 
     PAGE_WIDTH, PAGE_HEIGHT = A4
     left = 30
@@ -279,26 +284,20 @@ def generate_invoice_pdf_multi(invoice_number, items, grand_total, data, timesta
     content_width = right - left
     line_height = 14
 
-  
     grand_total = float(grand_total)
 
     c = canvas.Canvas(file_path, pagesize=A4)
-
- 
 
     def draw_header():
         c.setFont("Helvetica-Bold", 22)
         c.drawCentredString(PAGE_WIDTH/2, top - 10, "MOBILE WORLD LTD")
 
         c.setFont("Helvetica", 10)
-        c.drawCentredString(PAGE_WIDTH/2, top - 28,
-                            "Premium Mobile Devices & Accessories")
-        c.drawCentredString(PAGE_WIDTH/2, top - 42,
-                            "123 Roorkee, Haridwar, Uttarakhand 560001 | Phone: +91-8012345678")
+        c.drawCentredString(PAGE_WIDTH/2, top - 28, "Premium Mobile Devices & Accessories")
+        c.drawCentredString(PAGE_WIDTH/2, top - 42, "123 Roorkee, Haridwar, Uttarakhand 560001 | Phone: +91-8012345678")
 
         c.setFont("Helvetica-Bold", 9)
-        c.drawCentredString(PAGE_WIDTH/2, top - 56,
-                            "GSTIN: 29ABCDE1234F1Z5 | PAN: ABCDE1234F")
+        c.drawCentredString(PAGE_WIDTH/2, top - 56, "GSTIN: 29ABCDE1234F1Z5 | PAN: ABCDE1234F")
 
         c.setFont("Helvetica-Bold", 18)
         c.drawCentredString(PAGE_WIDTH/2, top - 82, "TAX INVOICE")
@@ -372,7 +371,6 @@ def generate_invoice_pdf_multi(invoice_number, items, grand_total, data, timesta
             draw_header()
             _draw_table_header()
 
-
     def _draw_table_header():
         nonlocal y
         y = top - 140
@@ -388,13 +386,11 @@ def generate_invoice_pdf_multi(invoice_number, items, grand_total, data, timesta
         c.drawString(col["amount"], y - 14, "AMOUNT")
         y -= 30
 
-
     for i, item in enumerate(items):
 
         pname = str(item.get("name"))
         wrapped = textwrap.wrap(pname, width=40)
         needed = max(1, len(wrapped))
-
         ensure_space(needed)
 
         row_h = needed * line_height + 8
@@ -408,7 +404,6 @@ def generate_invoice_pdf_multi(invoice_number, items, grand_total, data, timesta
 
         c.setFillColor(colors.black)
         c.setFont("Helvetica", 9)
-
         c.drawString(col["sno"], y - 2, str(i+1))
 
         ty = y
@@ -464,21 +459,15 @@ def generate_invoice_pdf_multi(invoice_number, items, grand_total, data, timesta
 
     y -= 10
 
-
-
-   #Draw UPI qr code (for payment)
     qr_data = f"upi://pay?pa=7830424458@slc&pn=MobileWorld&am={payable}&cu=INR"
     qr_img = qrcode.make(qr_data)
-    qr_path = "invoices/qr_temp.png"
+    qr_path = os.path.join(INVOICE_DIR, "qr_temp.png")
     qr_img.save(qr_path)
 
-
-    # Upi qr code for payments
     c.setFont("Helvetica-Bold", 11)
     c.drawString(left, y, "Scan to Pay")
 
     c.drawImage(qr_path, left, y - 130, width=120, height=120)
-
 
     y -= 150
     c.setFont("Helvetica-Bold", 10)
@@ -498,9 +487,7 @@ def generate_invoice_pdf_multi(invoice_number, items, grand_total, data, timesta
         c.drawString(left + 10, y, t)
         y -= 12
 
-
     sig_y = bottom + 70
-
     c.line(PAGE_WIDTH/2 + 20, sig_y, PAGE_WIDTH/2 + 150, sig_y)
     c.drawString(PAGE_WIDTH/2 + 40, sig_y - 12, "Authorized Signatory")
 
@@ -511,12 +498,6 @@ def generate_invoice_pdf_multi(invoice_number, items, grand_total, data, timesta
     c.save()
     return file_path
 
-    c.setFont("Helvetica", 7)
-    c.drawCentredString(PAGE_WIDTH / 2, bottom_margin,
-                        "This is a computer-generated invoice and does not require a signature")
-
-    c.save()
-    return file_path
 
 
 ####################   SCHEMAS   #########################
@@ -779,11 +760,14 @@ async def sell_products(data: SellMultiData):
 
 ##################### Download Pdf   #####################################
 @app.get("/download_invoice/{invoice_number}")
-async def download(invoice_number: str):
-    file_path = f"invoices/{invoice_number}.pdf"
+async def download_invoice(invoice_number: str):
+    file_path = os.path.join(INVOICE_DIR, f"{invoice_number}.pdf")
+
     if not os.path.exists(file_path):
         raise HTTPException(404, "Invoice not found")
-    return FileResponse(file_path, filename=f"{invoice_number}.pdf")
+
+    return FileResponse(file_path, media_type="application/pdf")
+
 
 
 
