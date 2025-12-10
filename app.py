@@ -36,9 +36,16 @@ from models import (
 # FASTAPI + CORS
 app = FastAPI(title="Inventory Management API")
 
+
+origins = [
+    "https://inventory-management-ero4.onrender.com",  # Render frontend
+    "http://localhost:5173",                            # Local React dev
+    "http://localhost:3000",                            # Optional (React alt port)
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["74.220.49.0/24", "74.220.57.0/24"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
