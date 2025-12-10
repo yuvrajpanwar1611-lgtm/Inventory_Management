@@ -38,7 +38,7 @@ app = FastAPI(title="Inventory Management API")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["https://inventory-management-frontend-hqhs.onrender.com/"],
+    allow_origins=["74.220.49.0/24", "74.220.57.0/24"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
