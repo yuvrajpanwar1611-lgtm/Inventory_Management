@@ -929,6 +929,7 @@ async def delete_supplier(id: int):
 
 
 ############################   Product Crud   ################################
+@app.post("/product/{supplier_id}")
 async def add_product(supplier_id: int, data: product_pydanticIn):
     supplier = await Supplier.get(id=supplier_id)
     d = data.dict(exclude_unset=True)
