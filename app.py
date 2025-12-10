@@ -57,8 +57,8 @@ def home():
 
 
 # EMAIL CONFIG 
-EMAIL = os.getenv("yuvrajpanwar1611@gmail.com")
-PASS = os.getenv("lptv mcsn lhlb ogle")
+EMAIL = "yuvrajpanwar1611@gmail.com"
+PASS = "lptv mcsn lhlb ogle"
 
 if not EMAIL or not PASS:
     raise Exception("❌ EMAIL or PASS not found in .env — Email sending cannot work!")
