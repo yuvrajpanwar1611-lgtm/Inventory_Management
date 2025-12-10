@@ -38,7 +38,7 @@ app = FastAPI(title="Inventory Management API")
 
 
 origins = [
-    "https://inventory-management-ero4.onrender.com",  # Render frontend
+    "https://inventory-management-frontend-hqhs.onrender.com",  # Render frontend
     "http://localhost:5173",                            # Local React dev
     "http://localhost:3000",                            # Optional (React alt port)
 ]
