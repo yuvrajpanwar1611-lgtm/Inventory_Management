@@ -1103,33 +1103,39 @@ def register_user(data: RegisterRequest):
 #     del email_otp_store[email]
 
 #     return {"status": "ok", "verified": True}
-from pydantic import BaseModel
 
-class EmailOtpVerify(BaseModel):
+
+email_otp_store = {}
+STATIC_OTP = 123456
+
+
+# --------------------------
+# Pydantic Models
+# --------------------------
+class EmailRequest(BaseModel):
+    email: str
+
+class EmailVerifyRequest(BaseModel):
     email: str
     otp: int
 
 
-
-email_otp_store = {}
-
-STATIC_OTP = 123456   # <<----- Your fixed OTP
-
-
+# --------------------------
+# SEND EMAIL OTP
+# --------------------------
 @app.post("/send-email-otp")
-async def send_email_otp(email: str):
-    if not MAIL_CONF:
-        raise HTTPException(500, "Email server not configured")
+async def send_email_otp(payload: EmailRequest):
+    email = payload.email
 
-    # Store static OTP
+    # Store the static OTP
     email_otp_store[email] = STATIC_OTP
 
     fm = FastMail(MAIL_CONF)
 
     html = f"""
-    <h3>Email Verification OTP</h3>
-    <p>Your OTP is: <strong>{STATIC_OTP}</strong></p>
-    <p>This OTP is static for testing purposes.</p>
+        <h3>Email Verification OTP</h3>
+        <p>Your OTP is: <strong>{STATIC_OTP}</strong></p>
+        <p>This OTP is static for testing purposes.</p>
     """
 
     message = MessageSchema(
@@ -1148,9 +1154,11 @@ async def send_email_otp(email: str):
     return {"status": "ok", "message": "OTP sent successfully"}
 
 
-
+# --------------------------
+# VERIFY EMAIL OTP
+# --------------------------
 @app.post("/verify-email-otp")
-async def verify_email_otp(payload: EmailOtpVerify):
+async def verify_email_otp(payload: EmailVerifyRequest):
     email = payload.email
     otp = payload.otp
 
@@ -1161,6 +1169,9 @@ async def verify_email_otp(payload: EmailOtpVerify):
 
     if otp != STATIC_OTP:
         raise HTTPException(400, "Invalid OTP")
+
+    # Remove OTP after success (optional)
+    email_otp_store.pop(email, None)
 
     return {"status": "ok", "verified": True}
 
