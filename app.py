@@ -1103,6 +1103,14 @@ def register_user(data: RegisterRequest):
 #     del email_otp_store[email]
 
 #     return {"status": "ok", "verified": True}
+from pydantic import BaseModel
+
+class EmailOtpVerify(BaseModel):
+    email: str
+    otp: int
+
+
+
 email_otp_store = {}
 
 STATIC_OTP = 123456   # <<----- Your fixed OTP
@@ -1142,7 +1150,10 @@ async def send_email_otp(email: str):
 
 
 @app.post("/verify-email-otp")
-async def verify_email_otp(email: str, otp: int):
+async def verify_email_otp(payload: EmailOtpVerify):
+    email = payload.email
+    otp = payload.otp
+
     stored_otp = email_otp_store.get(email)
 
     if not stored_otp:
@@ -1151,7 +1162,5 @@ async def verify_email_otp(email: str, otp: int):
     if otp != STATIC_OTP:
         raise HTTPException(400, "Invalid OTP")
 
-    # OTP correct — remove it (optional)
-    email_otp_store.pop(email, None)
-
     return {"status": "ok", "verified": True}
+
