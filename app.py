@@ -987,9 +987,72 @@ register_tortoise(
 
 
 
+# #-----------OTP API for mobile----------
+
+# STATIC_OTP = "123456"
+
+
+# verified_numbers = set()
+# users = []
+
+
+# class OTPRequest(BaseModel):
+#     mobile: str
+
+
+# class OTPVerifyRequest(BaseModel):
+#     mobile: str
+#     otp: str
+
+
+# class RegisterRequest(BaseModel):
+#     name: str
+#     mobile: str
+#     password: str
+
+
+# @app.post("/send-otp")
+# def send_otp(data: OTPRequest):
+#     return {
+#         "message": "OTP sent successfully",
+#         "otp_for_testing": STATIC_OTP  # ✅ ONLY FOR LEARNING
+#     }
+
+
+# @app.post("/verify-otp")
+# def verify_otp(data: OTPVerifyRequest):
+#     if data.otp == STATIC_OTP:
+#         verified_numbers.add(data.mobile)
+#         return {"verified": True}
+#     else:
+#         return {"verified": False}
+
+
+# @app.post("/register")
+# def register_user(data: RegisterRequest):
+
+#     # ✅ Check if mobile is verified
+#     if data.mobile not in verified_numbers:
+#         raise HTTPException(status_code=400, detail="Mobile number not verified")
+
+#     user = {
+#         "name": data.name,
+#         "mobile": data.mobile,
+#         "password": data.password
+#     }
+
+#     users.append(user)
+
+#     return {
+#         "message": "✅ User registered successfully",
+#         "user": user
+#     }
+
+
+
 #-----------OTP API for mobile----------
 
-STATIC_OTP = "123456"
+STATIC_OTP = 123456   # int OTP
 
 
 verified_numbers = set()
@@ -1002,7 +1065,7 @@ class OTPRequest(BaseModel):
 
 class OTPVerifyRequest(BaseModel):
     mobile: str
-    otp: str
+    otp: int
 
 
 class RegisterRequest(BaseModel):
@@ -1015,7 +1078,7 @@ class RegisterRequest(BaseModel):
 def send_otp(data: OTPRequest):
     return {
         "message": "OTP sent successfully",
-        "otp_for_testing": STATIC_OTP  # ✅ ONLY FOR LEARNING
+        "otp_for_testing": STATIC_OTP
     }
 
 
@@ -1031,7 +1094,6 @@ def verify_otp(data: OTPVerifyRequest):
 @app.post("/register")
 def register_user(data: RegisterRequest):
 
-    # ✅ Check if mobile is verified
     if data.mobile not in verified_numbers:
         raise HTTPException(status_code=400, detail="Mobile number not verified")
 
@@ -1044,10 +1106,9 @@ def register_user(data: RegisterRequest):
     users.append(user)
 
     return {
-        "message": "✅ User registered successfully",
+        "message": "User registered successfully",
         "user": user
     }
-
 
 #-----------OTP API for mail-------------------
 
