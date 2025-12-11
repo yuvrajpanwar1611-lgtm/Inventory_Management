@@ -87,8 +87,8 @@ def verify_password(raw, hashed):
     return pwd_context.verify(raw, hashed)
 
 
-def hash_password(raw):
-    return pwd_context.hash(raw)
+def hash_password(password: str):
+    return pwd_context.hash(password)
 
 
 def create_access_token(data: dict, expires: Optional[timedelta] = None):
@@ -100,8 +100,7 @@ def create_access_token(data: dict, expires: Optional[timedelta] = None):
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
-
-# SIGNUP / LOGIN
+# ===================== SIGNUP ===========================
 class SignupSchema(BaseModel):
     username: str
     email: str
@@ -121,19 +120,20 @@ async def signup(data: SignupSchema):
     if await User.filter(phone=data.phone).exists():
         raise HTTPException(400, "Phone already registered")
 
-    hashed = hash_password(data.password)
+    hashed_pw = hash_password(data.password)
 
     user = await User.create(
         username=data.username,
         email=data.email,
         phone=data.phone,
         full_name=data.full_name,
-        hashed_password=hashed
+        hashed_password=hashed_pw
     )
 
     return {"status": "ok", "user": await User_Pydantic.from_tortoise_orm(user)}
 
 
+# ===================== LOGIN ============================
 @app.post("/token")
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     user = await User.filter(username=form_data.username).first()
@@ -144,32 +144,37 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     if not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(401, "Incorrect username or password")
 
-    token = create_access_token({"sub": user.username})
+    # STORE USER ID IN TOKEN (important for multi-user)
+    token = create_access_token({"sub": str(user.id)})
+
     return {"access_token": token, "token_type": "bearer"}
 
 
+# ===================== CURRENT USER ======================
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
         data = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username = data.get("sub")
-        user = await User.filter(username=username).first()
+        user_id = data.get("sub")
+
+        user = await User.filter(id=user_id).first()
         if not user:
             raise HTTPException(401, "User not found")
+
         return user
-    except:
+
+    except Exception:
         raise HTTPException(401, "Invalid token")
 
 
 @app.get("/users/me")
 async def me(user: User = Depends(get_current_user)):
     return {
+        "id": user.id,
         "username": user.username,
         "email": user.email,
         "phone": user.phone,
         "full_name": user.full_name
     }
-
-
 
 
 # PDF GENERATOR
