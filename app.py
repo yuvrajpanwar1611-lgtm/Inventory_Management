@@ -1196,6 +1196,18 @@ async def register_user(data: RegisterRequest):
 #     return {"status": "ok", "verified": True}
 
 
+email_otp_store = {}
+STATIC_OTP = 123456   # for testing
+
+# Pydantic Models MUST come before routes
+class EmailRequest(BaseModel):
+    email: str
+
+class EmailVerifyRequest(BaseModel):
+    email: str
+    otp: int
+
+
 @app.post("/send-email-otp")
 async def send_email_otp(payload: EmailRequest):
     email = payload.email
@@ -1225,8 +1237,9 @@ async def send_email_otp(payload: EmailRequest):
     return {
         "status": "ok",
         "message": "OTP sent successfully",
-        "otp_for_testing": STATIC_OTP   # REQUIRED FOR FRONTEND
+        "otp_for_testing": STATIC_OTP
     }
+
 
 @app.post("/verify-email-otp")
 async def verify_email_otp(payload: EmailVerifyRequest):
@@ -1244,4 +1257,3 @@ async def verify_email_otp(payload: EmailVerifyRequest):
     email_otp_store.pop(email, None)
 
     return {"status": "ok", "verified": True}
-
