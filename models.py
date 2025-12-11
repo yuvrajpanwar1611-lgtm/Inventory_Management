@@ -1,4 +1,3 @@
-# models.py
 from tortoise import fields, models
 from tortoise.contrib.pydantic import pydantic_model_creator
 
@@ -28,9 +27,10 @@ class Supplier(models.Model):
     email = fields.CharField(max_length=120, unique=True)
     phone = fields.CharField(max_length=20, unique=True)
 
+    user = fields.ForeignKeyField("models.User", related_name="suppliers")
+
     class Meta:
         table = "supplier"
-
 
 
 
@@ -52,8 +52,11 @@ class Products(models.Model):
 
     supplied_by = fields.ForeignKeyField("models.Supplier", related_name="goods_supplied", null=True)
 
+    user = fields.ForeignKeyField("models.User", related_name="products")
+
     class Meta:
         table = "products"
+
 
 
 # STOCK MOVEMENT MODEL
@@ -73,15 +76,15 @@ class StockMovement(models.Model):
     customer_phone = fields.CharField(max_length=50, null=True)
     customer_email = fields.CharField(max_length=200, null=True)
 
-    # NEW: store invoice id/number (optional)
     invoice_number = fields.CharField(max_length=120, null=True)
 
     timestamp = fields.DatetimeField(auto_now_add=True)
 
+    
+    user = fields.ForeignKeyField("models.User", related_name="movements")
+
     class Meta:
         table = "stock_movement"
-
-
 
 
 

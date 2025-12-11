@@ -39,8 +39,8 @@ app = FastAPI(title="Inventory Management API")
 
 origins = [
     "https://inventory-management-frontend-hqhs.onrender.com",  # Render frontend
-    "http://localhost:5173",                            # Local React dev
-    "http://localhost:3000",                            # Optional (React alt port)
+    "http://localhost:5173",
+    "http://localhost:3000",
 ]
 
 app.add_middleware(
@@ -58,7 +58,7 @@ def home():
 
 # EMAIL CONFIG 
 EMAIL = "yuvrajpanwar1611@gmail.com"
-PASS = "lptvmcsnlhlbogle"  # remove spaces
+PASS = "lptvmcsnlhlbogle"
 
 MAIL_CONF = ConnectionConfig(
     MAIL_USERNAME=EMAIL,
@@ -506,10 +506,12 @@ class PurchaseData(BaseModel):
     quantity: int
     buy_price: float
 
+
 class SellItem(BaseModel):
     product_id: int
     quantity: int
     sell_price: float
+
 
 class SellData(BaseModel):
     quantity: int
@@ -517,6 +519,7 @@ class SellData(BaseModel):
     customer_name: str
     customer_phone: str
     customer_email: str
+
 
 class SellMultiData(BaseModel):
     items: List[SellItem]
@@ -526,18 +529,31 @@ class SellMultiData(BaseModel):
 
 
 
+
 ###################   Purchase Product   #############################
 @app.post("/product/purchase/{product_id}")
-async def purchase_product(product_id: int, data: PurchaseData):
-    product = await Products.get(id=product_id)
+async def purchase_product(
+    product_id: int,
+    data: PurchaseData,
+    user: User = Depends(get_current_user)       # 👈 REQUIRED for multi-user
+):
 
-    supplier = await Supplier.get_or_none(id=data.supplier_id)
+    #Ensure product belongs to logged-in user
+    product = await Products.get_or_none(id=product_id, owner_id=user.id)
+    if not product:
+        raise HTTPException(404, "Product not found for this user")
+
+
+    # Ensure supplier belongs to logged-in user
+    supplier = await Supplier.get_or_none(id=data.supplier_id, owner_id=user.id)
     if not supplier:
         raise HTTPException(400, "Invalid supplier id")
 
     if data.quantity <= 0:
         raise HTTPException(400, "Quantity must be > 0")
 
+
+    # UPDATE PRODUCT
     product.quantity_in_stock += data.quantity
     product.last_purchase_price = Decimal(str(data.buy_price))
     product.supplied_by_id = data.supplier_id
@@ -545,6 +561,8 @@ async def purchase_product(product_id: int, data: PurchaseData):
 
     total_amount = Decimal(str(data.buy_price)) * data.quantity
 
+
+    #Create stock movement with owner_id
     await StockMovement.create(
         product_id=product_id,
         movement_type="purchase",
@@ -552,10 +570,13 @@ async def purchase_product(product_id: int, data: PurchaseData):
         price_per_unit=Decimal(str(data.buy_price)),
         total_amount=total_amount,
         supplier_id=data.supplier_id,
+        owner_id=user.id,                   # 👈 REQUIRED
     )
 
     timestamp = datetime.now().strftime("%d-%m-%Y %I:%M %p")
 
+
+    # EMAIL
     if MAIL_CONF:
         fm = FastMail(MAIL_CONF)
 
@@ -622,12 +643,13 @@ async def purchase_product(product_id: int, data: PurchaseData):
 
     return {"status": "ok", "product": await product_pydantic.from_tortoise_orm(product)}
 
-
-
  
 ####################     Sell Api    ############################
 @app.post("/product/sell")
-async def sell_products(data: SellMultiData):
+async def sell_products(
+    data: SellMultiData,
+    user: User = Depends(get_current_user)     # 👈 REQUIRED for multi-user
+):
 
     items_out = []
     updates = []
@@ -636,7 +658,11 @@ async def sell_products(data: SellMultiData):
     invoice_number = f"INV-{int(datetime.now().timestamp())}"
 
     for item in data.items:
-        product = await Products.get(id=item.product_id)
+
+        # 🔥 Ensure product belongs to THIS USER
+        product = await Products.get_or_none(id=item.product_id, owner_id=user.id)
+        if not product:
+            raise HTTPException(404, "Product not found for this user")
 
         if product.quantity_in_stock < item.quantity:
             raise HTTPException(400, f"Not enough stock for {product.name}")
@@ -663,6 +689,7 @@ async def sell_products(data: SellMultiData):
         product.last_sale_price = price
         await product.save()
 
+        # 🔥 Movement also must store owner_id
         await StockMovement.create(
             product_id=product.id,
             movement_type="sale",
@@ -672,7 +699,8 @@ async def sell_products(data: SellMultiData):
             customer_name=data.customer_name,
             customer_phone=data.customer_phone,
             customer_email=data.customer_email,
-            invoice_number=invoice_number
+            invoice_number=invoice_number,
+            owner_id=user.id             # 👈 REQUIRED
         )
 
     # Creating Invoice Pdf
@@ -686,8 +714,7 @@ async def sell_products(data: SellMultiData):
         timestamp
     )
 
-
-    # SEND EMAIL 
+    #EMAIL
     if MAIL_CONF:
         fm = FastMail(MAIL_CONF)
 
@@ -756,29 +783,18 @@ async def sell_products(data: SellMultiData):
     }
 
 
-
-
 ##################### Download Pdf   #####################################
-@app.get("/download_invoice/{invoice_number}")
-async def download_invoice(invoice_number: str):
-    file_path = os.path.join(INVOICE_DIR, f"{invoice_number}.pdf")
-
-    if not os.path.exists(file_path):
-        raise HTTPException(404, "Invoice not found")
-
-    return FileResponse(file_path, media_type="application/pdf")
-
-
-
-
-
-
-
-
-######################### Movement History #################################
 @app.get("/product/{product_id}/movements")
-async def product_movements(product_id: int):
-    moves = await StockMovement.filter(product_id=product_id).order_by("-timestamp")
+async def product_movements(
+    product_id: int,
+    user: User = Depends(get_current_user)  
+):
+    # Only fetch movements created by this user
+    moves = await StockMovement.filter(
+        product_id=product_id,
+        owner_id=user.id                   
+    ).order_by("-timestamp")
+
     out = []
 
     for m in moves:
@@ -797,17 +813,13 @@ async def product_movements(product_id: int):
 
         ts = None
         try:
-            ts = m.timestamp.isoformat(sep=" ") if m.timestamp else None
-        except Exception:
-            try:
-                ts = str(m.timestamp)
-            except Exception:
-                ts = None
+            ts = m.timestamp.isoformat(sep=" ")
+        except:
+            ts = str(m.timestamp)
 
         invoice_pdf = None
         inv_num = getattr(m, "invoice_number", None)
         if inv_num:
-            
             invoice_pdf = f"/download_invoice/{inv_num}"
 
         out.append({
@@ -831,13 +843,17 @@ async def product_movements(product_id: int):
 
 
 
+
 @app.get("/movements")
-async def all_movements():
-    items = await StockMovement.all().order_by("-timestamp")
+async def all_movements(user: User = Depends(get_current_user)):
+
+    items = await StockMovement.filter(
+        owner_id=user.id        # 👈 show only user's movements
+    ).order_by("-timestamp")
+
     out = []
 
     for m in items:
-    
         try:
             product_obj = await m.product
             product_name = product_obj.name if product_obj else None
@@ -854,14 +870,11 @@ async def all_movements():
             "quantity": m.quantity,
             "price_per_unit": str(m.price_per_unit),
             "total_amount": str(m.total_amount),
-
             "supplier_id": m.supplier_id,
             "customer_name": m.customer_name,
             "customer_phone": m.customer_phone,
             "customer_email": m.customer_email,
-
             "timestamp": str(m.timestamp),
-
             "invoice_number": invoice_number
         })
 
@@ -871,26 +884,55 @@ async def all_movements():
 
 
 
+
 ############################   Supplier Crud   ################################
 @app.post("/supplier")
-async def add_supplier(data: supplier_pydanticIn):
-    obj = await Supplier.create(**data.dict(exclude_unset=True))
-    return {"status": "ok", "data": await supplier_pydantic.from_tortoise_orm(obj)}
+async def add_supplier(
+    data: supplier_pydanticIn,
+    user: User = Depends(get_current_user)  
+):
+    obj = await Supplier.create(
+        **data.dict(exclude_unset=True),
+        owner_id=user.id                     
+    )
+    return {
+        "status": "ok",
+        "data": await supplier_pydantic.from_tortoise_orm(obj)
+    }
+
+
 
 @app.get("/supplier")
-async def get_suppliers():
-    query = Supplier.all().order_by("id")   # correct (QuerySet)
+async def get_suppliers(user: User = Depends(get_current_user)):   
+    query = Supplier.filter(owner_id=user.id).order_by("id")        
     data = await supplier_pydantic.from_queryset(query)
     return {"status": "ok", "data": data}
 
 
+
 @app.get("/supplier/{id}")
-async def get_supplier(id: int):
-    return {"status": "ok", "data": await supplier_pydantic.from_queryset_single(Supplier.get(id=id))}
+async def get_supplier(id: int, user: User = Depends(get_current_user)):  
+
+    sup = await Supplier.filter(id=id, owner_id=user.id).first()    
+    if not sup:
+        raise HTTPException(404, "Supplier not found")
+
+    return {
+        "status": "ok",
+        "data": await supplier_pydantic.from_tortoise_orm(sup)
+    }
+
+
 
 @app.put("/supplier/{id}")
-async def update_supplier(id: int, data: dict = Body(...)):
-    supplier = await Supplier.get(id=id)
+async def update_supplier(
+    id: int,
+    data: dict = Body(...),
+    user: User = Depends(get_current_user)    
+):
+    supplier = await Supplier.filter(id=id, owner_id=user.id).first()  
+    if not supplier:
+        raise HTTPException(404, "Supplier not found")
 
     # Apply only provided fields
     for key, value in data.items():
@@ -898,58 +940,118 @@ async def update_supplier(id: int, data: dict = Body(...)):
             setattr(supplier, key, value)
 
     await supplier.save()
+
     return {
         "status": "ok",
         "data": await supplier_pydantic.from_tortoise_orm(supplier)
     }
 
+
+
 @app.delete("/supplier/{id}")
-async def delete_supplier(id: int):
-    await Supplier.filter(id=id).delete()
+async def delete_supplier(id: int, user: User = Depends(get_current_user)):   # NEW
+    deleted = await Supplier.filter(id=id, owner_id=user.id).delete()          # NEW
+
+    if not deleted:
+        raise HTTPException(404, "Supplier not found")
+
     return {"status": "ok"}
 
 
-
 ############################   Product Crud   ################################
+
 @app.post("/product/{supplier_id}")
-async def add_product(supplier_id: int, data: product_pydanticIn):
-    supplier = await Supplier.get(id=supplier_id)
+async def add_product(
+    supplier_id: int,
+    data: product_pydanticIn,
+    user: User = Depends(get_current_user)       # NEW
+):
+    supplier = await Supplier.filter(id=supplier_id, owner_id=user.id).first()  # NEW
+    if not supplier:
+        raise HTTPException(404, "Supplier not found")
+
     d = data.dict(exclude_unset=True)
     d["revenue"] = d.get("quantity_sold", 0) * d.get("unit_price", 0)
     d["net_profit"] = d.get("profit_per_piece", 0) * d.get("quantity_sold", 0)
-    obj = await Products.create(**d, supplied_by=supplier)
+
+    obj = await Products.create(
+        **d,
+        supplied_by=supplier,
+        owner_id=user.id                        # NEW
+    )
+
     return {"status": "ok", "data": await product_pydantic.from_tortoise_orm(obj)}
 
+
+
 @app.get("/product")
-async def get_products():
-    products = await Products.all().order_by("id").prefetch_related("supplied_by")
+async def get_products(user: User = Depends(get_current_user)):     # NEW
+
+    products = (
+        await Products.filter(owner_id=user.id)                     # NEW
+        .order_by("id")
+        .prefetch_related("supplied_by")
+    )
+
     data = []
     for p in products:
         item = await product_pydantic.from_tortoise_orm(p)
         d = item.dict()
         d["supplied_by_id"] = p.supplied_by_id
         data.append(d)
+
     return {"status": "ok", "data": data}
 
+
+
 @app.get("/product/{id}")
-async def get_product(id: int):
-    return {"status": "ok", "data": await product_pydantic.from_queryset_single(Products.get(id=id))}
+async def get_product(id: int, user: User = Depends(get_current_user)):     # NEW
+
+    product = await Products.filter(id=id, owner_id=user.id).first()        # NEW
+    if not product:
+        raise HTTPException(404, "Product not found")
+
+    return {"status": "ok", "data": await product_pydantic.from_tortoise_orm(product)}
+
+
 
 @app.put("/product/{id}")
-async def update_product(id: int, data: product_pydanticIn):
-    p = await Products.get(id=id)
+async def update_product(
+    id: int,
+    data: product_pydanticIn,
+    user: User = Depends(get_current_user)          # NEW
+):
+    p = await Products.filter(id=id, owner_id=user.id).first()      # NEW
+    if not p:
+        raise HTTPException(404, "Product not found")
+
     upd = data.dict(exclude_unset=True)
     for k, v in upd.items():
         setattr(p, k, v)
+
     p.revenue = p.quantity_sold * p.unit_price
     p.net_profit = p.profit_per_piece * p.quantity_sold
+
     await p.save()
+
     return {"status": "ok", "data": await product_pydantic.from_tortoise_orm(p)}
 
+
+
 @app.delete("/product/{id}")
-async def delete_product(id: int):
-    await Products.filter(id=id).delete()
+async def delete_product(id: int, user: User = Depends(get_current_user)):    # NEW
+
+    deleted = await Products.filter(id=id, owner_id=user.id).delete()         # NEW
+
+    if not deleted:
+        raise HTTPException(404, "Product not found")
+
     return {"status": "ok"}
+
+
+
+
+
 
 
 
@@ -960,76 +1062,14 @@ if not DB_URL:
     raise Exception("❌ DB_URL missing in .env (PostgreSQL connection required)")
 
 register_tortoise(
-    app,                              # FastAPI ka  instance jha ORM hook hoga
-    db_url=DB_URL,                    # Database ki connection string
-    modules={"models": ["models"]},   # Tortoise ko batata hai ki models kahan hain
-    generate_schemas=True,            # Automatically tables create kar dega
-    add_exception_handlers=True,      # Database mai errors ko readable banayega
+    app,
+    db_url=DB_URL,
+    modules={"models": ["models"]},
+    generate_schemas=False,    
+    add_exception_handlers=True,
 )
 
 
-
-
-# #-----------OTP API for mobile----------
-
-# STATIC_OTP = "123456"
-
-
-# verified_numbers = set()
-# users = []
-
-
-# class OTPRequest(BaseModel):
-#     mobile: str
-
-
-# class OTPVerifyRequest(BaseModel):
-#     mobile: str
-#     otp: str
-
-
-# class RegisterRequest(BaseModel):
-#     name: str
-#     mobile: str
-#     password: str
-
-
-# @app.post("/send-otp")
-# def send_otp(data: OTPRequest):
-#     return {
-#         "message": "OTP sent successfully",
-#         "otp_for_testing": STATIC_OTP  # ✅ ONLY FOR LEARNING
-#     }
-
-
-# @app.post("/verify-otp")
-# def verify_otp(data: OTPVerifyRequest):
-#     if data.otp == STATIC_OTP:
-#         verified_numbers.add(data.mobile)
-#         return {"verified": True}
-#     else:
-#         return {"verified": False}
-
-
-# @app.post("/register")
-# def register_user(data: RegisterRequest):
-
-#     # ✅ Check if mobile is verified
-#     if data.mobile not in verified_numbers:
-#         raise HTTPException(status_code=400, detail="Mobile number not verified")
-
-#     user = {
-#         "name": data.name,
-#         "mobile": data.mobile,
-#         "password": data.password
-#     }
-
-#     users.append(user)
-
-#     return {
-#         "message": "✅ User registered successfully",
-#         "user": user
-#     }
 
 
 
@@ -1037,9 +1077,7 @@ register_tortoise(
 
 STATIC_OTP = 123456   # int OTP
 
-
-verified_numbers = set()
-users = []
+verified_numbers = set()   # store verified mobiles
 
 
 class OTPRequest(BaseModel):
@@ -1075,23 +1113,27 @@ def verify_otp(data: OTPVerifyRequest):
 
 
 @app.post("/register")
-def register_user(data: RegisterRequest):
+async def register_user(data: RegisterRequest):
 
     if data.mobile not in verified_numbers:
         raise HTTPException(status_code=400, detail="Mobile number not verified")
 
-    user = {
-        "name": data.name,
-        "mobile": data.mobile,
-        "password": data.password
-    }
 
-    users.append(user)
+    hashed = hash_password(data.password)
+
+    user = await User.create(
+        username=data.mobile,   
+        email=f"{data.mobile}@auto.com", 
+        phone=data.mobile,
+        full_name=data.name,
+        hashed_password=hashed
+    )
 
     return {
         "message": "User registered successfully",
-        "user": user
+        "user": await User_Pydantic.from_tortoise_orm(user)
     }
+
 
 #-----------OTP API for mail-------------------
 
@@ -1153,9 +1195,6 @@ email_otp_store = {}
 STATIC_OTP = 123456
 
 
-# --------------------------
-# Pydantic Models
-# --------------------------
 class EmailRequest(BaseModel):
     email: str
 
@@ -1164,14 +1203,9 @@ class EmailVerifyRequest(BaseModel):
     otp: int
 
 
-# --------------------------
-# SEND EMAIL OTP
-# --------------------------
 @app.post("/send-email-otp")
 async def send_email_otp(payload: EmailRequest):
     email = payload.email
-
-    # Store the static OTP
     email_otp_store[email] = STATIC_OTP
 
     fm = FastMail(MAIL_CONF)
@@ -1198,9 +1232,6 @@ async def send_email_otp(payload: EmailRequest):
     return {"status": "ok", "message": "OTP sent successfully"}
 
 
-# --------------------------
-# VERIFY EMAIL OTP
-# --------------------------
 @app.post("/verify-email-otp")
 async def verify_email_otp(payload: EmailVerifyRequest):
     email = payload.email
@@ -1214,7 +1245,6 @@ async def verify_email_otp(payload: EmailVerifyRequest):
     if otp != STATIC_OTP:
         raise HTTPException(400, "Invalid OTP")
 
-    # Remove OTP after success (optional)
     email_otp_store.pop(email, None)
 
     return {"status": "ok", "verified": True}
