@@ -100,7 +100,8 @@ def create_access_token(data: dict, expires: Optional[timedelta] = None):
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
-# ===================== SIGNUP ===========================
+
+#########################   SIGNUP   ##############################
 class SignupSchema(BaseModel):
     username: str
     email: str
@@ -111,6 +112,8 @@ class SignupSchema(BaseModel):
 
 @app.post("/signup")
 async def signup(data: SignupSchema):
+
+    # Check duplicates
     if await User.filter(username=data.username).exists():
         raise HTTPException(400, "Username already exists")
 
@@ -120,8 +123,10 @@ async def signup(data: SignupSchema):
     if await User.filter(phone=data.phone).exists():
         raise HTTPException(400, "Phone already registered")
 
+    # Hash password
     hashed_pw = hash_password(data.password)
 
+    # Create user
     user = await User.create(
         username=data.username,
         email=data.email,
@@ -133,7 +138,8 @@ async def signup(data: SignupSchema):
     return {"status": "ok", "user": await User_Pydantic.from_tortoise_orm(user)}
 
 
-# ===================== LOGIN ============================
+
+#########################   LOGIN   ##############################
 @app.post("/token")
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     user = await User.filter(username=form_data.username).first()
@@ -144,28 +150,36 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     if not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(401, "Incorrect username or password")
 
-    # STORE USER ID IN TOKEN (important for multi-user)
+    # Store USER ID inside JWT — important for multi-user database
     token = create_access_token({"sub": str(user.id)})
 
     return {"access_token": token, "token_type": "bearer"}
 
 
-# ===================== CURRENT USER ======================
+
+#####################   CURRENT USER   #############################
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
         data = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
         user_id = data.get("sub")
 
-        user = await User.filter(id=user_id).first()
+        if not user_id:
+            raise HTTPException(401, "Invalid token")
+
+        # Convert ID to int (safe)
+        user = await User.filter(id=int(user_id)).first()
+
         if not user:
             raise HTTPException(401, "User not found")
 
         return user
 
     except Exception:
-        raise HTTPException(401, "Invalid token")
+        raise HTTPException(401, "Invalid or expired token")
 
 
+
+#####################   /users/me API   #############################
 @app.get("/users/me")
 async def me(user: User = Depends(get_current_user)):
     return {
@@ -175,6 +189,7 @@ async def me(user: User = Depends(get_current_user)):
         "phone": user.phone,
         "full_name": user.full_name
     }
+
 
 
 # PDF GENERATOR
