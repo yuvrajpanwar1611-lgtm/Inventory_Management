@@ -75,34 +75,31 @@ MAIL_CONF = ConnectionConfig(
 
 
 #################   AUTH CONFIG (JWT)   ###########################
-SECRET_KEY = os.getenv("SECRET_KEY") or "super_secret_key"
+SECRET_KEY = os.getenv("SECRET_KEY") or "super_secret_key_change_me"
 ALGORITHM = "HS256"
+# Default token lifetime 30 days (user stays logged in until they logout)
+ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 30
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token")
 
 
-def verify_password(raw, hashed):
+def verify_password(raw: str, hashed: str) -> bool:
     return pwd_context.verify(raw, hashed)
 
 
-def hash_password(password: str):
+def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
 
-# ========================================
-#  PERMANENT TOKEN (NO EXPIRY)
-# ========================================
-def create_access_token(data: dict):
-    """
-    Creates JWT WITHOUT expiry.
-    User stays logged in until logout.
-    """
-    return jwt.encode(data, SECRET_KEY, algorithm=ALGORITHM)
+def create_access_token(data: dict, expires_minutes: int = ACCESS_TOKEN_EXPIRE_MINUTES):
+    to_encode = data.copy()
+    expire = datetime.utcnow() + timedelta(minutes=expires_minutes)
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
-
-#########################   SIGNUP   ##############################
+# --- SIGNUP (same as before) ---
 class SignupSchema(BaseModel):
     username: str
     email: str
@@ -113,21 +110,15 @@ class SignupSchema(BaseModel):
 
 @app.post("/signup")
 async def signup(data: SignupSchema):
-
-    # Check duplicates
     if await User.filter(username=data.username).exists():
         raise HTTPException(400, "Username already exists")
-
     if await User.filter(email=data.email).exists():
         raise HTTPException(400, "Email already registered")
-
     if await User.filter(phone=data.phone).exists():
         raise HTTPException(400, "Phone already registered")
 
-    # Hash password
     hashed_pw = hash_password(data.password)
 
-    # Create user
     user = await User.create(
         username=data.username,
         email=data.email,
@@ -139,47 +130,34 @@ async def signup(data: SignupSchema):
     return {"status": "ok", "user": await User_Pydantic.from_tortoise_orm(user)}
 
 
-
-#########################   LOGIN   ##############################
+# --- LOGIN: return access_token with user id in sub ---
 @app.post("/token")
 async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     user = await User.filter(username=form_data.username).first()
-
-    if not user:
+    if not user or not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(401, "Incorrect username or password")
 
-    if not verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(401, "Incorrect username or password")
-
-    # Store USER ID inside JWT
     token = create_access_token({"sub": str(user.id)})
+    # return expiry too (seconds) — useful for frontend if needed
+    return {"access_token": token, "token_type": "bearer", "expires_in_minutes": ACCESS_TOKEN_EXPIRE_MINUTES}
 
-    return {"access_token": token, "token_type": "bearer"}
 
-
-
-#####################   CURRENT USER   #############################
+# --- get_current_user: decodes token and returns user model ---
 async def get_current_user(token: str = Depends(oauth2_scheme)):
     try:
-        data = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        user_id = data.get("sub")
-
+        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
+        user_id = payload.get("sub")
         if not user_id:
             raise HTTPException(401, "Invalid token")
 
         user = await User.filter(id=int(user_id)).first()
-
         if not user:
             raise HTTPException(401, "User not found")
-
         return user
-
-    except Exception:
-        raise HTTPException(401, "Invalid token")
-
+    except JWTError:
+        raise HTTPException(401, "Invalid or expired token")
 
 
-#####################   /users/me API   #############################
 @app.get("/users/me")
 async def me(user: User = Depends(get_current_user)):
     return {
