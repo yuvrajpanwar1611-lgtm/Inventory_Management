@@ -1196,18 +1196,6 @@ async def register_user(data: RegisterRequest):
 #     return {"status": "ok", "verified": True}
 
 
-email_otp_store = {}
-STATIC_OTP = 123456
-
-
-class EmailRequest(BaseModel):
-    email: str
-
-class EmailVerifyRequest(BaseModel):
-    email: str
-    otp: int
-
-
 @app.post("/send-email-otp")
 async def send_email_otp(payload: EmailRequest):
     email = payload.email
@@ -1234,8 +1222,11 @@ async def send_email_otp(payload: EmailRequest):
         print("Email error:", e)
         raise HTTPException(500, "Failed to send OTP email")
 
-    return {"status": "ok", "message": "OTP sent successfully"}
-
+    return {
+        "status": "ok",
+        "message": "OTP sent successfully",
+        "otp_for_testing": STATIC_OTP   # REQUIRED FOR FRONTEND
+    }
 
 @app.post("/verify-email-otp")
 async def verify_email_otp(payload: EmailVerifyRequest):
