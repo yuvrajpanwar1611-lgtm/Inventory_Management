@@ -77,7 +77,6 @@ MAIL_CONF = ConnectionConfig(
 #################   AUTH CONFIG (JWT)   ###########################
 SECRET_KEY = os.getenv("SECRET_KEY") or "super_secret_key"
 ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60
 
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token")
@@ -91,13 +90,15 @@ def hash_password(password: str):
     return pwd_context.hash(password)
 
 
-def create_access_token(data: dict, expires: Optional[timedelta] = None):
-    to_encode = data.copy()
-    expire = datetime.utcnow() + (
-        expires or timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    )
-    to_encode.update({"exp": expire})
-    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
+# ========================================
+#  PERMANENT TOKEN (NO EXPIRY)
+# ========================================
+def create_access_token(data: dict):
+    """
+    Creates JWT WITHOUT expiry.
+    User stays logged in until logout.
+    """
+    return jwt.encode(data, SECRET_KEY, algorithm=ALGORITHM)
 
 
 
@@ -150,7 +151,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends()):
     if not verify_password(form_data.password, user.hashed_password):
         raise HTTPException(401, "Incorrect username or password")
 
-    # Store USER ID inside JWT — important for multi-user database
+    # Store USER ID inside JWT
     token = create_access_token({"sub": str(user.id)})
 
     return {"access_token": token, "token_type": "bearer"}
@@ -166,7 +167,6 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         if not user_id:
             raise HTTPException(401, "Invalid token")
 
-        # Convert ID to int (safe)
         user = await User.filter(id=int(user_id)).first()
 
         if not user:
@@ -175,7 +175,7 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
         return user
 
     except Exception:
-        raise HTTPException(401, "Invalid or expired token")
+        raise HTTPException(401, "Invalid token")
 
 
 
@@ -189,7 +189,6 @@ async def me(user: User = Depends(get_current_user)):
         "phone": user.phone,
         "full_name": user.full_name
     }
-
 
 
 # PDF GENERATOR
