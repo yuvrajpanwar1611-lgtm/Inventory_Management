@@ -1,6 +1,6 @@
 import os
 from typing import List, Optional
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from fastapi import FastAPI, HTTPException, Depends, status, Body
@@ -56,26 +56,30 @@ def home():
     return {"msg": "API Running"}
 
 
-# EMAIL CONFIG 
-EMAIL = "yuvrajpanwar1611@gmail.com"
-PASS = "lptvmcsnlhlbogle"
+# EMAIL CONFIG (must come from environment; fail fast if missing)
+EMAIL = os.getenv("EMAIL_USER")
+PASS = os.getenv("EMAIL_PASS")
 
-MAIL_CONF = ConnectionConfig(
-    MAIL_USERNAME=EMAIL,
-    MAIL_PASSWORD=PASS,
-    MAIL_FROM=EMAIL,
-    MAIL_PORT=465,
-    MAIL_SERVER="smtp.gmail.com",
-    MAIL_SSL_TLS=True,
-    MAIL_STARTTLS=False,
-    USE_CREDENTIALS=True,
-    VALIDATE_CERTS=True
-)
+MAIL_CONF = None
+if EMAIL and PASS:
+    MAIL_CONF = ConnectionConfig(
+        MAIL_USERNAME=EMAIL,
+        MAIL_PASSWORD=PASS,
+        MAIL_FROM=EMAIL,
+        MAIL_PORT=465,
+        MAIL_SERVER="smtp.gmail.com",
+        MAIL_SSL_TLS=True,
+        MAIL_STARTTLS=False,
+        USE_CREDENTIALS=True,
+        VALIDATE_CERTS=True
+    )
 
 
 
 #################   AUTH CONFIG (JWT)   ###########################
-SECRET_KEY = os.getenv("SECRET_KEY") or "super_secret_key_change_me"
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    raise Exception("SECRET_KEY missing in environment")
 ALGORITHM = "HS256"
 # Default token lifetime 30 days (user stays logged in until they logout)
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 30
@@ -92,13 +96,11 @@ def hash_password(password: str) -> str:
     return pwd_context.hash(password)
 
 
-# def create_access_token(data: dict, expires_minutes: int = ACCESS_TOKEN_EXPIRE_MINUTES):
-#     to_encode = data.copy()
-#     expire = datetime.utcnow() + timedelta(minutes=expires_minutes)
-#     to_encode.update({"exp": expire})
-#     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-def create_access_token(data: dict):
-    return jwt.encode(data, SECRET_KEY, algorithm=ALGORITHM)
+def create_access_token(data: dict, expires_minutes: int = ACCESS_TOKEN_EXPIRE_MINUTES):
+    to_encode = data.copy()
+    expire = datetime.now(timezone.utc) + timedelta(minutes=expires_minutes)
+    to_encode.update({"exp": expire})
+    return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
 
 
 
@@ -255,8 +257,9 @@ async def me(user: User = Depends(get_current_user)):
 from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
-from reportlab.lib.units import mm
-import textwrap, os, qrcode
+from reportlab.lib.utils import ImageReader
+from io import BytesIO
+import textwrap, os, qrcode, secrets
 from decimal import Decimal
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -461,13 +464,15 @@ def generate_invoice_pdf_multi(invoice_number, items, grand_total, data, timesta
 
     qr_data = f"upi://pay?pa=7830424458@slc&pn=MobileWorld&am={payable}&cu=INR"
     qr_img = qrcode.make(qr_data)
-    qr_path = os.path.join(INVOICE_DIR, "qr_temp.png")
-    qr_img.save(qr_path)
+    qr_buffer = BytesIO()
+    qr_img.save(qr_buffer, format="PNG")
+    qr_buffer.seek(0)
+    qr_reader = ImageReader(qr_buffer)
 
     c.setFont("Helvetica-Bold", 11)
     c.drawString(left, y, "Scan to Pay")
 
-    c.drawImage(qr_path, left, y - 130, width=120, height=120)
+    c.drawImage(qr_reader, left, y - 130, width=120, height=120)
 
     y -= 150
     c.setFont("Helvetica-Bold", 10)
@@ -538,14 +543,14 @@ async def purchase_product(
     user: User = Depends(get_current_user)       # 👈 REQUIRED for multi-user
 ):
 
-    #Ensure product belongs to logged-in user
-    product = await Products.get_or_none(id=product_id, owner_id=user.id)
+    # Ensure product belongs to logged-in user
+    product = await Products.get_or_none(id=product_id, user_id=user.id)
     if not product:
         raise HTTPException(404, "Product not found for this user")
 
 
     # Ensure supplier belongs to logged-in user
-    supplier = await Supplier.get_or_none(id=data.supplier_id, owner_id=user.id)
+    supplier = await Supplier.get_or_none(id=data.supplier_id, user_id=user.id)
     if not supplier:
         raise HTTPException(400, "Invalid supplier id")
 
@@ -562,7 +567,7 @@ async def purchase_product(
     total_amount = Decimal(str(data.buy_price)) * data.quantity
 
 
-    #Create stock movement with owner_id
+    # Create stock movement with user scoping
     await StockMovement.create(
         product_id=product_id,
         movement_type="purchase",
@@ -570,7 +575,7 @@ async def purchase_product(
         price_per_unit=Decimal(str(data.buy_price)),
         total_amount=total_amount,
         supplier_id=data.supplier_id,
-        owner_id=user.id,                   # 👈 REQUIRED
+        user_id=user.id,
     )
 
     timestamp = datetime.now().strftime("%d-%m-%Y %I:%M %p")
@@ -660,7 +665,7 @@ async def sell_products(
     for item in data.items:
 
         # 🔥 Ensure product belongs to THIS USER
-        product = await Products.get_or_none(id=item.product_id, owner_id=user.id)
+        product = await Products.get_or_none(id=item.product_id, user_id=user.id)
         if not product:
             raise HTTPException(404, "Product not found for this user")
 
@@ -689,7 +694,7 @@ async def sell_products(
         product.last_sale_price = price
         await product.save()
 
-        # 🔥 Movement also must store owner_id
+        # 🔥 Movement also must store user_id
         await StockMovement.create(
             product_id=product.id,
             movement_type="sale",
@@ -700,7 +705,7 @@ async def sell_products(
             customer_phone=data.customer_phone,
             customer_email=data.customer_email,
             invoice_number=invoice_number,
-            owner_id=user.id             # 👈 REQUIRED
+            user_id=user.id
         )
 
     # Creating Invoice Pdf
@@ -792,7 +797,7 @@ async def product_movements(
     # Only fetch movements created by this user
     moves = await StockMovement.filter(
         product_id=product_id,
-        owner_id=user.id                   
+        user_id=user.id                   
     ).order_by("-timestamp")
 
     out = []
@@ -848,7 +853,7 @@ async def product_movements(
 async def all_movements(user: User = Depends(get_current_user)):
 
     items = await StockMovement.filter(
-        owner_id=user.id        # 👈 show only user's movements
+        user_id=user.id        # 👈 show only user's movements
     ).order_by("-timestamp")
 
     out = []
@@ -893,7 +898,7 @@ async def add_supplier(
 ):
     obj = await Supplier.create(
         **data.dict(exclude_unset=True),
-        owner_id=user.id                     
+        user_id=user.id                     
     )
     return {
         "status": "ok",
@@ -904,7 +909,7 @@ async def add_supplier(
 
 @app.get("/supplier")
 async def get_suppliers(user: User = Depends(get_current_user)):   
-    query = Supplier.filter(owner_id=user.id).order_by("id")        
+    query = Supplier.filter(user_id=user.id).order_by("id")        
     data = await supplier_pydantic.from_queryset(query)
     return {"status": "ok", "data": data}
 
@@ -913,7 +918,7 @@ async def get_suppliers(user: User = Depends(get_current_user)):
 @app.get("/supplier/{id}")
 async def get_supplier(id: int, user: User = Depends(get_current_user)):  
 
-    sup = await Supplier.filter(id=id, owner_id=user.id).first()    
+    sup = await Supplier.filter(id=id, user_id=user.id).first()    
     if not sup:
         raise HTTPException(404, "Supplier not found")
 
@@ -927,15 +932,15 @@ async def get_supplier(id: int, user: User = Depends(get_current_user)):
 @app.put("/supplier/{id}")
 async def update_supplier(
     id: int,
-    data: dict = Body(...),
+    data: supplier_pydanticIn = Body(...),
     user: User = Depends(get_current_user)    
 ):
-    supplier = await Supplier.filter(id=id, owner_id=user.id).first()  
+    supplier = await Supplier.filter(id=id, user_id=user.id).first()  
     if not supplier:
         raise HTTPException(404, "Supplier not found")
 
-    # Apply only provided fields
-    for key, value in data.items():
+    upd = data.dict(exclude_unset=True)
+    for key, value in upd.items():
         if hasattr(supplier, key):
             setattr(supplier, key, value)
 
@@ -950,7 +955,7 @@ async def update_supplier(
 
 @app.delete("/supplier/{id}")
 async def delete_supplier(id: int, user: User = Depends(get_current_user)):   # NEW
-    deleted = await Supplier.filter(id=id, owner_id=user.id).delete()          # NEW
+    deleted = await Supplier.filter(id=id, user_id=user.id).delete()          # NEW
 
     if not deleted:
         raise HTTPException(404, "Supplier not found")
@@ -966,7 +971,7 @@ async def add_product(
     data: product_pydanticIn,
     user: User = Depends(get_current_user)       # NEW
 ):
-    supplier = await Supplier.filter(id=supplier_id, owner_id=user.id).first()  # NEW
+    supplier = await Supplier.filter(id=supplier_id, user_id=user.id).first()  # NEW
     if not supplier:
         raise HTTPException(404, "Supplier not found")
 
@@ -977,7 +982,7 @@ async def add_product(
     obj = await Products.create(
         **d,
         supplied_by=supplier,
-        owner_id=user.id                        # NEW
+        user_id=user.id                        # NEW
     )
 
     return {"status": "ok", "data": await product_pydantic.from_tortoise_orm(obj)}
@@ -988,7 +993,7 @@ async def add_product(
 async def get_products(user: User = Depends(get_current_user)):     # NEW
 
     products = (
-        await Products.filter(owner_id=user.id)                     # NEW
+        await Products.filter(user_id=user.id)                     # NEW
         .order_by("id")
         .prefetch_related("supplied_by")
     )
@@ -1007,7 +1012,7 @@ async def get_products(user: User = Depends(get_current_user)):     # NEW
 @app.get("/product/{id}")
 async def get_product(id: int, user: User = Depends(get_current_user)):     # NEW
 
-    product = await Products.filter(id=id, owner_id=user.id).first()        # NEW
+    product = await Products.filter(id=id, user_id=user.id).first()        # NEW
     if not product:
         raise HTTPException(404, "Product not found")
 
@@ -1021,7 +1026,7 @@ async def update_product(
     data: product_pydanticIn,
     user: User = Depends(get_current_user)          # NEW
 ):
-    p = await Products.filter(id=id, owner_id=user.id).first()      # NEW
+    p = await Products.filter(id=id, user_id=user.id).first()      # NEW
     if not p:
         raise HTTPException(404, "Product not found")
 
@@ -1041,7 +1046,7 @@ async def update_product(
 @app.delete("/product/{id}")
 async def delete_product(id: int, user: User = Depends(get_current_user)):    # NEW
 
-    deleted = await Products.filter(id=id, owner_id=user.id).delete()         # NEW
+    deleted = await Products.filter(id=id, user_id=user.id).delete()         # NEW
 
     if not deleted:
         raise HTTPException(404, "Product not found")
@@ -1075,9 +1080,9 @@ register_tortoise(
 
 #-----------OTP API for mobile----------
 
-STATIC_OTP = 123456   # int OTP
-
+OTP_TTL_MINUTES = 5
 verified_numbers = set()   # store verified mobiles
+mobile_otp_store = {}
 
 
 class OTPRequest(BaseModel):
@@ -1095,21 +1100,37 @@ class RegisterRequest(BaseModel):
     password: str
 
 
+def _generate_otp() -> int:
+    # 6-digit random OTP
+    return 100000 + secrets.randbelow(900000 - 100000)
+
+
 @app.post("/send-otp")
 def send_otp(data: OTPRequest):
+    otp = _generate_otp()
+    expires = datetime.now(timezone.utc) + timedelta(minutes=OTP_TTL_MINUTES)
+    mobile_otp_store[data.mobile] = {"otp": otp, "expires": expires}
     return {
-        "message": "OTP sent successfully",
-        "otp_for_testing": STATIC_OTP
+        "message": "OTP sent successfully"
     }
 
 
 @app.post("/verify-otp")
 def verify_otp(data: OTPVerifyRequest):
-    if data.otp == STATIC_OTP:
-        verified_numbers.add(data.mobile)
-        return {"verified": True}
-    else:
-        return {"verified": False}
+    entry = mobile_otp_store.get(data.mobile)
+    if not entry:
+        return {"verified": False, "reason": "OTP not requested"}
+
+    if entry["expires"] < datetime.now(timezone.utc):
+        mobile_otp_store.pop(data.mobile, None)
+        return {"verified": False, "reason": "OTP expired"}
+
+    if data.otp != entry["otp"]:
+        return {"verified": False, "reason": "Invalid OTP"}
+
+    mobile_otp_store.pop(data.mobile, None)
+    verified_numbers.add(data.mobile)
+    return {"verified": True}
 
 
 @app.post("/register")
@@ -1192,7 +1213,7 @@ async def register_user(data: RegisterRequest):
 
 
 email_otp_store = {}
-STATIC_OTP = 123456   # for testing
+EMAIL_OTP_TTL_MINUTES = 5
 
 # Pydantic Models MUST come before routes
 class EmailRequest(BaseModel):
@@ -1205,15 +1226,20 @@ class EmailVerifyRequest(BaseModel):
 
 @app.post("/send-email-otp")
 async def send_email_otp(payload: EmailRequest):
+    if not MAIL_CONF:
+        raise HTTPException(500, "Email server not configured")
+
     email = payload.email
-    email_otp_store[email] = STATIC_OTP
+    otp = _generate_otp()
+    expires = datetime.now(timezone.utc) + timedelta(minutes=EMAIL_OTP_TTL_MINUTES)
+    email_otp_store[email] = {"otp": otp, "expires": expires}
 
     fm = FastMail(MAIL_CONF)
 
     html = f"""
         <h3>Email Verification OTP</h3>
-        <p>Your OTP is: <strong>{STATIC_OTP}</strong></p>
-        <p>This OTP is static for testing purposes.</p>
+        <p>Your OTP is: <strong>{otp}</strong></p>
+        <p>This OTP expires in {EMAIL_OTP_TTL_MINUTES} minutes.</p>
     """
 
     message = MessageSchema(
@@ -1231,8 +1257,7 @@ async def send_email_otp(payload: EmailRequest):
 
     return {
         "status": "ok",
-        "message": "OTP sent successfully",
-        "otp_for_testing": STATIC_OTP
+        "message": "OTP sent successfully"
     }
 
 
@@ -1241,12 +1266,16 @@ async def verify_email_otp(payload: EmailVerifyRequest):
     email = payload.email
     otp = payload.otp
 
-    stored_otp = email_otp_store.get(email)
+    stored = email_otp_store.get(email)
 
-    if not stored_otp:
+    if not stored:
         raise HTTPException(400, "OTP not found")
 
-    if otp != STATIC_OTP:
+    if stored["expires"] < datetime.now(timezone.utc):
+        email_otp_store.pop(email, None)
+        raise HTTPException(400, "OTP expired")
+
+    if otp != stored["otp"]:
         raise HTTPException(400, "Invalid OTP")
 
     email_otp_store.pop(email, None)
