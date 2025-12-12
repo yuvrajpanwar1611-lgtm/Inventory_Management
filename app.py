@@ -19,8 +19,12 @@ from reportlab.pdfgen import canvas
 from reportlab.lib.pagesizes import A4
 from reportlab.lib import colors
 
+import logging
 from dotenv import load_dotenv
 load_dotenv()
+
+logger = logging.getLogger("inventory")
+logging.basicConfig(level=logging.INFO)
 
 # Import models
 from models import (
@@ -56,9 +60,15 @@ def home():
     return {"msg": "API Running"}
 
 
+@app.get("/health")
+def health():
+    return {"status": "ok", "time": datetime.now(timezone.utc).isoformat()}
+
+
 # EMAIL CONFIG (must come from environment; fail fast if missing)
-EMAIL = os.getenv("EMAIL_USER")
-PASS = os.getenv("EMAIL_PASS")
+# Support both EMAIL_USER/PASS and legacy EMAIL/PASS env names.
+EMAIL = os.getenv("EMAIL_USER") or os.getenv("EMAIL")
+PASS = os.getenv("EMAIL_PASS") or os.getenv("PASS")
 
 MAIL_CONF = None
 if EMAIL and PASS:
@@ -73,6 +83,8 @@ if EMAIL and PASS:
         USE_CREDENTIALS=True,
         VALIDATE_CERTS=True
     )
+else:
+    logger.warning("MAIL_CONF not initialized: missing EMAIL/EMAIL_USER or PASS/EMAIL_PASS env vars")
 
 
 
@@ -556,6 +568,8 @@ async def purchase_product(
 
     if data.quantity <= 0:
         raise HTTPException(400, "Quantity must be > 0")
+    if data.buy_price <= 0:
+        raise HTTPException(400, "Buy price must be > 0")
 
 
     # UPDATE PRODUCT
@@ -671,6 +685,10 @@ async def sell_products(
 
         if product.quantity_in_stock < item.quantity:
             raise HTTPException(400, f"Not enough stock for {product.name}")
+        if item.quantity <= 0:
+            raise HTTPException(400, "Quantity must be > 0")
+        if item.sell_price <= 0:
+            raise HTTPException(400, "Sell price must be > 0")
 
         price = Decimal(str(item.sell_price))
         total = price * item.quantity
@@ -900,6 +918,7 @@ async def add_supplier(
         **data.dict(exclude_unset=True),
         user_id=user.id                     
     )
+    logger.info("Supplier created by user_id=%s id=%s", user.id, obj.id)
     return {
         "status": "ok",
         "data": await supplier_pydantic.from_tortoise_orm(obj)
@@ -984,6 +1003,7 @@ async def add_product(
         supplied_by=supplier,
         user_id=user.id                        # NEW
     )
+    logger.info("Product created by user_id=%s id=%s", user.id, obj.id)
 
     return {"status": "ok", "data": await product_pydantic.from_tortoise_orm(obj)}
 
@@ -1107,6 +1127,8 @@ def _generate_otp() -> int:
 
 @app.post("/send-otp")
 def send_otp(data: OTPRequest):
+    if not data.mobile:
+        raise HTTPException(400, "Mobile required")
     otp = _generate_otp()
     expires = datetime.now(timezone.utc) + timedelta(minutes=OTP_TTL_MINUTES)
     mobile_otp_store[data.mobile] = {"otp": otp, "expires": expires}
@@ -1117,6 +1139,8 @@ def send_otp(data: OTPRequest):
 
 @app.post("/verify-otp")
 def verify_otp(data: OTPVerifyRequest):
+    if not data.mobile:
+        return {"verified": False, "reason": "Mobile required"}
     entry = mobile_otp_store.get(data.mobile)
     if not entry:
         return {"verified": False, "reason": "OTP not requested"}
@@ -1139,6 +1163,10 @@ async def register_user(data: RegisterRequest):
     if data.mobile not in verified_numbers:
         raise HTTPException(status_code=400, detail="Mobile number not verified")
 
+    if await User.filter(username=data.mobile).exists():
+        raise HTTPException(status_code=400, detail="User already exists for this mobile")
+    if await User.filter(email=f"{data.mobile}@auto.com").exists():
+        raise HTTPException(status_code=400, detail="Email already exists for this mobile")
 
     hashed = hash_password(data.password)
 
