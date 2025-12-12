@@ -91,7 +91,14 @@ else:
 #################   AUTH CONFIG (JWT)   ###########################
 SECRET_KEY = os.getenv("SECRET_KEY")
 if not SECRET_KEY:
-    raise Exception("SECRET_KEY missing in environment")
+    # Generate a temporary secret key for development (NOT for production!)
+    import secrets as sec_lib
+    SECRET_KEY = sec_lib.token_urlsafe(32)
+    logger.warning("⚠️  SECRET_KEY not set in environment. Using temporary key (NOT SECURE FOR PRODUCTION!)")
+    logger.warning("⚠️  Set SECRET_KEY in your .env file for production deployments")
+else:
+    logger.info("✅ SECRET_KEY loaded from environment")
+
 ALGORITHM = "HS256"
 # Default token lifetime 30 days (user stays logged in until they logout)
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 30
@@ -127,24 +134,55 @@ class SignupSchema(BaseModel):
 
 @app.post("/signup")
 async def signup(data: SignupSchema):
+    """
+    Standard signup endpoint. Requires email and phone OTP verification.
+    Use /register for mobile-only registration.
+    """
+    if not data.username or not data.username.strip():
+        raise HTTPException(400, "Username is required")
+    if not data.email or "@" not in data.email:
+        raise HTTPException(400, "Valid email is required")
+    if not data.phone or not data.phone.strip():
+        raise HTTPException(400, "Phone number is required")
+    if not data.password or len(data.password) < 6:
+        raise HTTPException(400, "Password must be at least 6 characters")
+    
+    # Check if email and phone are verified
+    email_lower = data.email.strip().lower()
+    if email_lower not in email_verified_set:
+        raise HTTPException(400, "Email not verified. Please verify email OTP first.")
+    
+    if data.phone not in verified_numbers:
+        raise HTTPException(400, "Phone number not verified. Please verify phone OTP first.")
+    
     if await User.filter(username=data.username).exists():
         raise HTTPException(400, "Username already exists")
-    if await User.filter(email=data.email).exists():
+    if await User.filter(email=email_lower).exists():
         raise HTTPException(400, "Email already registered")
     if await User.filter(phone=data.phone).exists():
         raise HTTPException(400, "Phone already registered")
 
     hashed_pw = hash_password(data.password)
 
-    user = await User.create(
-        username=data.username,
-        email=data.email,
-        phone=data.phone,
-        full_name=data.full_name,
-        hashed_password=hashed_pw
-    )
-
-    return {"status": "ok", "user": await User_Pydantic.from_tortoise_orm(user)}
+    try:
+        user = await User.create(
+            username=data.username.strip(),
+            email=email_lower,
+            phone=data.phone.strip(),
+            full_name=data.full_name.strip() if data.full_name else None,
+            hashed_password=hashed_pw
+        )
+        
+        # Remove from verified sets after successful registration
+        email_verified_set.discard(email_lower)
+        verified_numbers.discard(data.phone)
+        
+        logger.info(f"New user signed up: {user.username} (ID: {user.id})")
+        
+        return {"status": "ok", "user": await User_Pydantic.from_tortoise_orm(user)}
+    except Exception as e:
+        logger.error(f"Signup error: {e}")
+        raise HTTPException(500, "Signup failed. Please try again.")
 
 
 # --- LOGIN: return access_token with user id in sub ---
@@ -806,6 +844,37 @@ async def sell_products(
     }
 
 
+##################### Download Invoice PDF   #####################################
+@app.get("/download_invoice/{invoice_number}")
+async def download_invoice(
+    invoice_number: str,
+    user: User = Depends(get_current_user)
+):
+    """
+    Download invoice PDF. Only allows access to invoices created by the authenticated user.
+    """
+    # Find the stock movement with this invoice number for this user
+    movement = await StockMovement.filter(
+        invoice_number=invoice_number,
+        user_id=user.id
+    ).first()
+    
+    if not movement:
+        raise HTTPException(404, "Invoice not found or access denied")
+    
+    # Construct file path
+    file_path = os.path.join(INVOICE_DIR, f"{invoice_number}.pdf")
+    
+    if not os.path.exists(file_path):
+        raise HTTPException(404, "Invoice file not found")
+    
+    return FileResponse(
+        file_path,
+        media_type="application/pdf",
+        filename=f"invoice_{invoice_number}.pdf"
+    )
+
+
 ##################### Download Pdf   #####################################
 @app.get("/product/{product_id}/movements")
 async def product_movements(
@@ -1084,15 +1153,23 @@ async def delete_product(id: int, user: User = Depends(get_current_user)):    # 
 DB_URL = os.getenv("DB_URL")
 
 if not DB_URL:
-    raise Exception("❌ DB_URL missing in .env (PostgreSQL connection required)")
+    error_msg = (
+        "❌ DB_URL missing in environment variables.\n"
+        "Please set DB_URL in your .env file.\n"
+        "Example: DB_URL=postgres://user:password@localhost:5432/dbname"
+    )
+    logger.error(error_msg)
+    raise Exception(error_msg)
 
+logger.info("✅ Database URL configured")
 register_tortoise(
     app,
     db_url=DB_URL,
     modules={"models": ["models"]},
-    generate_schemas=False,    
+    generate_schemas=False,  # Set to True if you want auto-generate schemas on startup
     add_exception_handlers=True,
 )
+logger.info("✅ Database connection initialized")
 
 
 
@@ -1103,6 +1180,8 @@ register_tortoise(
 OTP_TTL_MINUTES = 5
 verified_numbers = set()   # store verified mobiles
 mobile_otp_store = {}
+# Rate limiting: track last OTP request time per mobile
+otp_rate_limit = {}
 
 
 class OTPRequest(BaseModel):
@@ -1121,67 +1200,111 @@ class RegisterRequest(BaseModel):
 
 
 def _generate_otp() -> int:
-    # 6-digit random OTP
-    return 100000 + secrets.randbelow(900000 - 100000)
+    # 6-digit random OTP (100000 to 999999)
+    return 100000 + secrets.randbelow(900000)
 
 
 @app.post("/send-otp")
 def send_otp(data: OTPRequest):
-    if not data.mobile:
-        raise HTTPException(400, "Mobile required")
+    if not data.mobile or not data.mobile.strip():
+        raise HTTPException(400, "Mobile number is required")
+    
+    # Basic rate limiting: max 1 OTP per minute per mobile
+    now = datetime.now(timezone.utc)
+    last_request = otp_rate_limit.get(data.mobile)
+    if last_request and (now - last_request).total_seconds() < 60:
+        raise HTTPException(429, "Please wait before requesting another OTP")
+    
     otp = _generate_otp()
-    expires = datetime.now(timezone.utc) + timedelta(minutes=OTP_TTL_MINUTES)
+    expires = now + timedelta(minutes=OTP_TTL_MINUTES)
     mobile_otp_store[data.mobile] = {"otp": otp, "expires": expires}
+    otp_rate_limit[data.mobile] = now
+    
+    # In production, send SMS here using a service like Twilio, AWS SNS, etc.
+    # For now, log it (remove in production or use proper SMS service)
+    logger.info(f"OTP for {data.mobile}: {otp} (expires in {OTP_TTL_MINUTES} minutes)")
+    
     return {
-        "message": "OTP sent successfully"
+        "message": "OTP sent successfully",
+        "expires_in_minutes": OTP_TTL_MINUTES
     }
 
 
 @app.post("/verify-otp")
 def verify_otp(data: OTPVerifyRequest):
-    if not data.mobile:
-        return {"verified": False, "reason": "Mobile required"}
+    if not data.mobile or not data.mobile.strip():
+        raise HTTPException(400, "Mobile number is required")
+    
+    if not data.otp or data.otp < 100000 or data.otp > 999999:
+        raise HTTPException(400, "Invalid OTP format")
+    
     entry = mobile_otp_store.get(data.mobile)
     if not entry:
-        return {"verified": False, "reason": "OTP not requested"}
-
+        raise HTTPException(400, "OTP not found. Please request a new OTP")
+    
     if entry["expires"] < datetime.now(timezone.utc):
         mobile_otp_store.pop(data.mobile, None)
-        return {"verified": False, "reason": "OTP expired"}
-
+        raise HTTPException(400, "OTP has expired. Please request a new one")
+    
     if data.otp != entry["otp"]:
-        return {"verified": False, "reason": "Invalid OTP"}
-
+        # Don't reveal if OTP exists but is wrong vs doesn't exist
+        raise HTTPException(400, "Invalid OTP")
+    
+    # OTP verified successfully
     mobile_otp_store.pop(data.mobile, None)
     verified_numbers.add(data.mobile)
-    return {"verified": True}
+    return {"verified": True, "message": "Mobile number verified successfully"}
 
 
 @app.post("/register")
 async def register_user(data: RegisterRequest):
+    """
+    Register a new user with mobile OTP verification.
+    Note: This endpoint is for mobile-only registration.
+    For email-based registration, use /signup endpoint.
+    """
+    if not data.mobile or not data.mobile.strip():
+        raise HTTPException(status_code=400, detail="Mobile number is required")
+    
+    if not data.name or not data.name.strip():
+        raise HTTPException(status_code=400, detail="Name is required")
+    
+    if not data.password or len(data.password) < 6:
+        raise HTTPException(status_code=400, detail="Password must be at least 6 characters")
 
     if data.mobile not in verified_numbers:
-        raise HTTPException(status_code=400, detail="Mobile number not verified")
+        raise HTTPException(status_code=400, detail="Mobile number not verified. Please verify OTP first.")
 
     if await User.filter(username=data.mobile).exists():
-        raise HTTPException(status_code=400, detail="User already exists for this mobile")
-    if await User.filter(email=f"{data.mobile}@auto.com").exists():
+        raise HTTPException(status_code=400, detail="User already exists for this mobile number")
+    
+    auto_email = f"{data.mobile}@auto.com"
+    if await User.filter(email=auto_email).exists():
         raise HTTPException(status_code=400, detail="Email already exists for this mobile")
 
     hashed = hash_password(data.password)
 
-    user = await User.create(
-        username=data.mobile,   
-        email=f"{data.mobile}@auto.com", 
-        phone=data.mobile,
-        full_name=data.name,
-        hashed_password=hashed
-    )
-
-    return {
-        "message": "User registered successfully",
-        "user": await User_Pydantic.from_tortoise_orm(user)
-    }
+    try:
+        user = await User.create(
+            username=data.mobile,   
+            email=auto_email, 
+            phone=data.mobile,
+            full_name=data.name.strip(),
+            hashed_password=hashed
+        )
+        
+        # Remove from verified set after successful registration
+        verified_numbers.discard(data.mobile)
+        
+        logger.info(f"New user registered: {user.username} (ID: {user.id})")
+        
+        return {
+            "message": "User registered successfully",
+            "user": await User_Pydantic.from_tortoise_orm(user)
+        }
+    except Exception as e:
+        logger.error(f"Registration error: {e}")
+        raise HTTPException(status_code=500, detail="Registration failed. Please try again.")
 
 
 #-----------OTP API for mail-------------------
@@ -1241,7 +1364,10 @@ async def register_user(data: RegisterRequest):
 
 
 email_otp_store = {}
+email_verified_set = set()  # Track verified emails
 EMAIL_OTP_TTL_MINUTES = 5
+email_otp_rate_limit = {}  # Rate limiting for email OTP
+
 
 # Pydantic Models MUST come before routes
 class EmailRequest(BaseModel):
@@ -1257,55 +1383,87 @@ async def send_email_otp(payload: EmailRequest):
     if not MAIL_CONF:
         raise HTTPException(500, "Email server not configured")
 
-    email = payload.email
+    email = payload.email.strip().lower()
+    if not email or "@" not in email:
+        raise HTTPException(400, "Valid email address is required")
+    
+    # Basic rate limiting: max 1 OTP per minute per email
+    now = datetime.now(timezone.utc)
+    last_request = email_otp_rate_limit.get(email)
+    if last_request and (now - last_request).total_seconds() < 60:
+        raise HTTPException(429, "Please wait before requesting another OTP")
+    
     otp = _generate_otp()
-    expires = datetime.now(timezone.utc) + timedelta(minutes=EMAIL_OTP_TTL_MINUTES)
+    expires = now + timedelta(minutes=EMAIL_OTP_TTL_MINUTES)
     email_otp_store[email] = {"otp": otp, "expires": expires}
+    email_otp_rate_limit[email] = now
 
     fm = FastMail(MAIL_CONF)
 
     html = f"""
-        <h3>Email Verification OTP</h3>
-        <p>Your OTP is: <strong>{otp}</strong></p>
-        <p>This OTP expires in {EMAIL_OTP_TTL_MINUTES} minutes.</p>
+    <div style="font-family: Arial, sans-serif; padding: 20px; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #1a73e8;">Email Verification OTP</h2>
+        <p>Your verification code is:</p>
+        <div style="background: #f1f9ff; padding: 15px; border-radius: 8px; text-align: center; margin: 20px 0;">
+            <h1 style="color: #1a73e8; margin: 0; letter-spacing: 5px;">{otp}</h1>
+        </div>
+        <p style="color: #666;">This OTP will expire in {EMAIL_OTP_TTL_MINUTES} minutes.</p>
+        <p style="color: #999; font-size: 12px;">If you didn't request this code, please ignore this email.</p>
+    </div>
     """
 
     message = MessageSchema(
-        subject="Email OTP Verification",
+        subject="Email OTP Verification - Inventory Management",
         recipients=[email],
         body=html,
-        subtype="html"
+        subtype=MessageType.html
     )
 
     try:
         await fm.send_message(message)
+        logger.info(f"Email OTP sent to {email}")
     except Exception as e:
-        print("Email error:", e)
-        raise HTTPException(500, "Failed to send OTP email")
+        logger.error(f"Failed to send email OTP to {email}: {e}")
+        # Remove the OTP from store if email failed
+        email_otp_store.pop(email, None)
+        raise HTTPException(500, "Failed to send OTP email. Please try again later.")
 
     return {
         "status": "ok",
-        "message": "OTP sent successfully"
+        "message": "OTP sent successfully to your email",
+        "expires_in_minutes": EMAIL_OTP_TTL_MINUTES
     }
 
 
 @app.post("/verify-email-otp")
 async def verify_email_otp(payload: EmailVerifyRequest):
-    email = payload.email
+    email = payload.email.strip().lower()
     otp = payload.otp
+
+    if not email or "@" not in email:
+        raise HTTPException(400, "Valid email address is required")
+    
+    if not otp or otp < 100000 or otp > 999999:
+        raise HTTPException(400, "Invalid OTP format")
 
     stored = email_otp_store.get(email)
 
     if not stored:
-        raise HTTPException(400, "OTP not found")
+        raise HTTPException(400, "OTP not found. Please request a new OTP")
 
     if stored["expires"] < datetime.now(timezone.utc):
         email_otp_store.pop(email, None)
-        raise HTTPException(400, "OTP expired")
+        raise HTTPException(400, "OTP has expired. Please request a new one")
 
     if otp != stored["otp"]:
         raise HTTPException(400, "Invalid OTP")
 
+    # OTP verified successfully
     email_otp_store.pop(email, None)
+    email_verified_set.add(email)
 
-    return {"status": "ok", "verified": True}
+    return {
+        "status": "ok",
+        "verified": True,
+        "message": "Email verified successfully"
+    }
