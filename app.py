@@ -330,7 +330,7 @@
 
 # @app.get("/product")
 # async def get_products(user: User = Depends(get_current_user)):
-#     items = await Products.filter(owner_id=user.id).prefetch_related("supplied_by")
+#     items = await Products.filter(user_id=user.id).prefetch_related("supplied_by")
 #     out = []
 
 #     for p in items:
@@ -546,7 +546,7 @@
 
 # @app.get("/supplier")
 # async def get_suppliers(user: User = Depends(get_current_user)):
-#     qs = Supplier.filter(owner_id=user.id)
+#     qs = Supplier.filter(user_id=user.id)
 #     data = await supplier_pydantic.from_queryset(qs)
 #     return {"status": "ok", "data": data}
 
@@ -582,7 +582,7 @@
 
 # @app.get("/movements")
 # async def all_movements(user: User = Depends(get_current_user)):
-#     items = await StockMovement.filter(owner_id=user.id).order_by("-timestamp")
+#     items = await StockMovement.filter(user_id=user.id).order_by("-timestamp")
 #     out = []
 
 #     for m in items:
@@ -1013,7 +1013,7 @@ async def get_suppliers(user: User = Depends(get_current_user)):
     return {
         "status": "ok",
         "data": await supplier_pydantic.from_queryset(
-            Supplier.filter(owner_id=user.id)
+            Supplier.filter(user_id=user.id)
         )
     }
 
@@ -1061,7 +1061,7 @@ async def add_product(
 
 # @app.get("/product")
 # async def get_products(user: User = Depends(get_current_user)):
-#     products = await Products.filter(owner_id=user.id).prefetch_related("supplied_by")
+#     products = await Products.filter(user_id=user.id).prefetch_related("supplied_by")
 #     out = []
 #     for p in products:
 #         d = (await product_pydantic.from_tortoise_orm(p)).dict()
@@ -1070,7 +1070,7 @@ async def add_product(
 #     return {"status": "ok", "data": out}
 @app.get("/product")
 async def get_products(user: User = Depends(get_current_user)):
-    products = await Products.filter(owner_id=user.id).prefetch_related("supplied_by")
+    products = await Products.filter(user_id=user.id).prefetch_related("supplied_by")
 
     out = []
     for p in products:
@@ -1214,7 +1214,7 @@ async def movements(user: User = Depends(get_current_user)):
     the frontend expects (includes invoice_number and customer info).
     """
     out = []
-    for m in await StockMovement.filter(owner_id=user.id).order_by("-timestamp"):
+    for m in await StockMovement.filter(user_id=user.id).order_by("-timestamp"):
         product = await m.product
         out.append({
             "id": m.id,
