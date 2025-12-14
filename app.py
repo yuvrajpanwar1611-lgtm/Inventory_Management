@@ -1074,12 +1074,18 @@ async def get_products(user: User = Depends(get_current_user)):
 
     out = []
     for p in products:
-        item = (await product_pydantic.from_tortoise_orm(p)).dict()
-
-        # SAFE access
-        item["supplied_by_id"] = p.supplied_by_id if p.supplied_by_id else None
-
-        out.append(item)
+        out.append({
+            "id": p.id,
+            "name": p.name,
+            "quantity_in_stock": p.quantity_in_stock,
+            "quantity_sold": p.quantity_sold,
+            "unit_price": str(p.unit_price),
+            "revenue": str(p.revenue),
+            "profit_per_piece": str(p.profit_per_piece),
+            "net_profit": str(p.net_profit),
+            "last_purchase_price": str(p.last_purchase_price),
+            "supplied_by_id": p.supplied_by_id,
+        })
 
     return {"status": "ok", "data": out}
 
