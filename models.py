@@ -167,7 +167,7 @@ class Supplier(models.Model):
     email = fields.CharField(max_length=120)
     phone = fields.CharField(max_length=20)
 
-    user = fields.ForeignKeyField("models.User", related_name="suppliers")
+    owner = fields.ForeignKeyField("models.User", related_name="suppliers")
 
     class Meta:
         table = "supplier"
@@ -191,7 +191,7 @@ class Products(models.Model):
     last_purchase_price = fields.DecimalField(max_digits=12, decimal_places=2, default=Decimal("0.00"))
 
     supplied_by = fields.ForeignKeyField("models.Supplier", related_name="goods_supplied", null=True)
-    user = fields.ForeignKeyField("models.User", related_name="products")
+    owner = fields.ForeignKeyField("models.User", related_name="products")
 
     class Meta:
         table = "products"
@@ -216,7 +216,7 @@ class StockMovement(models.Model):
     invoice_number = fields.CharField(max_length=120, null=True)
     timestamp = fields.DatetimeField(auto_now_add=True)
 
-    user = fields.ForeignKeyField("models.User", related_name="movements")
+    owner = fields.ForeignKeyField("models.User", related_name="movements")
 
     class Meta:
         table = "stock_movement"
@@ -229,4 +229,3 @@ product_pydanticIn = pydantic_model_creator(Products, name="ProductIn", exclude_
 supplier_pydantic = pydantic_model_creator(Supplier, name="Supplier")
 supplier_pydanticIn = pydantic_model_creator(Supplier, name="SupplierIn", exclude_readonly=True)
 stockmovement_pydantic = pydantic_model_creator(StockMovement, name="StockMovement")
-
