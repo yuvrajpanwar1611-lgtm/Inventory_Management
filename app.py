@@ -1059,14 +1059,28 @@ async def add_product(
     obj = await Products.create(**d, supplied_by=supplier, owner_id=user.id)
     return {"status": "ok", "data": await product_pydantic.from_tortoise_orm(obj)}
 
+# @app.get("/product")
+# async def get_products(user: User = Depends(get_current_user)):
+#     products = await Products.filter(owner_id=user.id).prefetch_related("supplied_by")
+#     out = []
+#     for p in products:
+#         d = (await product_pydantic.from_tortoise_orm(p)).dict()
+#         d["supplied_by_id"] = p.supplied_by_id
+#         out.append(d)
+#     return {"status": "ok", "data": out}
 @app.get("/product")
 async def get_products(user: User = Depends(get_current_user)):
     products = await Products.filter(owner_id=user.id).prefetch_related("supplied_by")
+
     out = []
     for p in products:
-        d = (await product_pydantic.from_tortoise_orm(p)).dict()
-        d["supplied_by_id"] = p.supplied_by_id
-        out.append(d)
+        item = (await product_pydantic.from_tortoise_orm(p)).dict()
+
+        # SAFE access
+        item["supplied_by_id"] = p.supplied_by_id if p.supplied_by_id else None
+
+        out.append(item)
+
     return {"status": "ok", "data": out}
 
 # ======================================================
