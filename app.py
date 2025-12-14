@@ -122,11 +122,11 @@
 # async def get_current_user(token: str = Depends(oauth2_scheme)):
 #     try:
 #         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-#         owner_id = payload.get("sub")
-#         if not owner_id:
+#         user_id = payload.get("sub")
+#         if not user_id:
 #             raise HTTPException(401, "Invalid token")
 
-#         user = await User.filter(id=int(owner_id)).first()
+#         user = await User.filter(id=int(user_id)).first()
 #         if not user:
 #             raise HTTPException(401, "User not found")
 #         return user
@@ -317,14 +317,14 @@
 # @app.post("/product/{supplier_id}")
 # async def add_product(supplier_id: int, data: product_pydanticIn, user: User = Depends(get_current_user)):
 
-#     supplier = await Supplier.filter(id=supplier_id, owner_id=user.id).first()
+#     supplier = await Supplier.filter(id=supplier_id, user_id=user.id).first()
 #     if not supplier:
 #         raise HTTPException(404, "Supplier not found")
 
 #     obj = await Products.create(
 #         **data.dict(),
 #         supplied_by=supplier,
-#         owner_id=user.id
+#         user_id=user.id
 #     )
 #     return {"status": "ok", "data": await product_pydantic.from_tortoise_orm(obj)}
 
@@ -342,7 +342,7 @@
 
 # @app.put("/product/{id}")
 # async def update_product(id: int, data: product_pydanticIn, user: User = Depends(get_current_user)):
-#     p = await Products.filter(id=id, owner_id=user.id).first()
+#     p = await Products.filter(id=id, user_id=user.id).first()
 #     if not p:
 #         raise HTTPException(404, "Product not found")
 
@@ -357,7 +357,7 @@
 
 # @app.delete("/product/{id}")
 # async def delete_product(id: int, user: User = Depends(get_current_user)):
-#     deleted = await Products.filter(id=id, owner_id=user.id).delete()
+#     deleted = await Products.filter(id=id, user_id=user.id).delete()
 #     if not deleted:
 #         raise HTTPException(404, "Product not found")
 #     return {"status": "ok"}
@@ -374,11 +374,11 @@
 # @app.post("/product/purchase/{product_id}")
 # async def purchase_product(product_id: int, data: PurchaseData, user: User = Depends(get_current_user)):
 
-#     product = await Products.filter(id=product_id, owner_id=user.id).first()
+#     product = await Products.filter(id=product_id, user_id=user.id).first()
 #     if not product:
 #         raise HTTPException(404, "Product not found")
 
-#     supplier = await Supplier.filter(id=data.supplier_id, owner_id=user.id).first()
+#     supplier = await Supplier.filter(id=data.supplier_id, user_id=user.id).first()
 #     if not supplier:
 #         raise HTTPException(404, "Supplier not found")
 
@@ -399,7 +399,7 @@
 #         price_per_unit=Decimal(str(data.buy_price)),
 #         total_amount=Decimal(str(data.buy_price)) * data.quantity,
 #         supplier_id=data.supplier_id,
-#         owner_id=user.id,
+#         user_id=user.id,
 #     )
 
 #     return {"status": "ok"}
@@ -479,7 +479,7 @@
 
 #     for item in data.items:
 
-#         product = await Products.filter(id=item.product_id, owner_id=user.id).first()
+#         product = await Products.filter(id=item.product_id, user_id=user.id).first()
 #         if not product:
 #             raise HTTPException(404, f"Product not found")
 
@@ -509,7 +509,7 @@
 #             quantity=qty,
 #             price_per_unit=price,
 #             total_amount=total,
-#             owner_id=user.id,
+#             user_id=user.id,
 #             customer_name=data.customer_name,
 #             customer_phone=data.customer_phone,
 #             customer_email=data.customer_email,
@@ -525,7 +525,7 @@
 
 # @app.get("/download_invoice/{invoice_no}")
 # async def download_inv(invoice_no: str, user: User = Depends(get_current_user)):
-#     movement = await StockMovement.filter(invoice_number=invoice_no, owner_id=user.id).first()
+#     movement = await StockMovement.filter(invoice_number=invoice_no, user_id=user.id).first()
 #     if not movement:
 #         raise HTTPException(404, "Invoice not found")
 
@@ -541,7 +541,7 @@
 
 # @app.post("/supplier")
 # async def add_supplier(data: supplier_pydanticIn, user: User = Depends(get_current_user)):
-#     obj = await Supplier.create(**data.dict(), owner_id=user.id)
+#     obj = await Supplier.create(**data.dict(), user_id=user.id)
 #     return {"status": "ok", "data": await supplier_pydantic.from_tortoise_orm(obj)}
 
 # @app.get("/supplier")
@@ -552,14 +552,14 @@
 
 # @app.get("/supplier/{id}")
 # async def get_supplier(id: int, user: User = Depends(get_current_user)):
-#     s = await Supplier.filter(id=id, owner_id=user.id).first()
+#     s = await Supplier.filter(id=id, user_id=user.id).first()
 #     if not s:
 #         raise HTTPException(404, "Supplier not found")
 #     return {"status": "ok", "data": await supplier_pydantic.from_tortoise_orm(s)}
 
 # @app.put("/supplier/{id}")
 # async def update_supplier(id: int, data: supplier_pydanticIn, user: User = Depends(get_current_user)):
-#     s = await Supplier.filter(id=id, owner_id=user.id).first()
+#     s = await Supplier.filter(id=id, user_id=user.id).first()
 #     if not s:
 #         raise HTTPException(404, "Supplier not found")
 
@@ -571,7 +571,7 @@
 
 # @app.delete("/supplier/{id}")
 # async def delete_supplier(id: int, user: User = Depends(get_current_user)):
-#     deleted = await Supplier.filter(id=id, owner_id=user.id).delete()
+#     deleted = await Supplier.filter(id=id, user_id=user.id).delete()
 #     if not deleted:
 #         raise HTTPException(404, "Supplier not found")
 #     return {"status": "ok"}
@@ -742,12 +742,12 @@ async def get_current_user(token: str = Depends(oauth2_scheme)):
 
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        owner_id = payload.get("sub")
+        user_id = payload.get("sub")
 
-        if owner_id is None:
+        if user_id is None:
             raise HTTPException(status_code=401, detail="Invalid token payload")
 
-        user = await User.filter(id=int(owner_id)).first()
+        user = await User.filter(id=int(user_id)).first()
         if not user:
             raise HTTPException(status_code=401, detail="User not found")
 
@@ -1005,7 +1005,7 @@ class SellMultiData(BaseModel):
 # ======================================================
 @app.post("/supplier")
 async def add_supplier(data: supplier_pydanticIn, user: User = Depends(get_current_user)):
-    obj = await Supplier.create(**data.dict(), owner_id=user.id)
+    obj = await Supplier.create(**data.dict(), user_id=user.id)
     return {"status": "ok", "data": await supplier_pydantic.from_tortoise_orm(obj)}
 
 @app.get("/supplier")
@@ -1023,7 +1023,7 @@ async def update_supplier(
     data: dict = Body(...),
     user: User = Depends(get_current_user)
 ):
-    supplier = await Supplier.filter(id=supplier_id, owner_id=user.id).first()
+    supplier = await Supplier.filter(id=supplier_id, user_id=user.id).first()
     if not supplier:
         raise HTTPException(404, "Supplier not found")
 
@@ -1036,7 +1036,7 @@ async def update_supplier(
 
 @app.delete("/supplier/{supplier_id}")
 async def delete_supplier(supplier_id: int, user: User = Depends(get_current_user)):
-    await Supplier.filter(id=supplier_id, owner_id=user.id).delete()
+    await Supplier.filter(id=supplier_id, user_id=user.id).delete()
     return {"status": "ok"}
 
 # ======================================================
@@ -1048,7 +1048,7 @@ async def add_product(
     data: product_pydanticIn,
     user: User = Depends(get_current_user)
 ):
-    supplier = await Supplier.filter(id=supplier_id, owner_id=user.id).first()
+    supplier = await Supplier.filter(id=supplier_id, user_id=user.id).first()
     if not supplier:
         raise HTTPException(404, "Supplier not found")
 
@@ -1056,7 +1056,7 @@ async def add_product(
     d["revenue"] = d.get("quantity_sold", 0) * d.get("unit_price", 0)
     d["net_profit"] = d.get("profit_per_piece", 0) * d.get("quantity_sold", 0)
 
-    obj = await Products.create(**d, supplied_by=supplier, owner_id=user.id)
+    obj = await Products.create(**d, supplied_by=supplier, user_id=user.id)
     return {"status": "ok", "data": await product_pydantic.from_tortoise_orm(obj)}
 
 # @app.get("/product")
@@ -1098,8 +1098,8 @@ async def purchase_product(
     data: PurchaseData,
     user: User = Depends(get_current_user)
 ):
-    product = await Products.filter(id=product_id, owner_id=user.id).first()
-    supplier = await Supplier.filter(id=data.supplier_id, owner_id=user.id).first()
+    product = await Products.filter(id=product_id, user_id=user.id).first()
+    supplier = await Supplier.filter(id=data.supplier_id, user_id=user.id).first()
 
     if not product or not supplier:
         raise HTTPException(404, "Invalid product or supplier")
@@ -1115,7 +1115,7 @@ async def purchase_product(
         price_per_unit=Decimal(str(data.buy_price)),
         total_amount=Decimal(str(data.buy_price)) * data.quantity,
         supplier_id=supplier.id,
-        owner_id=user.id
+        user_id=user.id
     )
 
     return {"status": "ok"}
@@ -1135,7 +1135,7 @@ async def sell_multi(data: SellMultiData, user: User = Depends(get_current_user)
         for item in data.items:
             product = await Products.filter(
                 id=item.product_id,
-                owner_id=user.id
+                user_id=user.id
             ).first()
 
             if not product:
@@ -1169,7 +1169,7 @@ async def sell_multi(data: SellMultiData, user: User = Depends(get_current_user)
                 customer_phone=data.customer_phone,
                 customer_email=data.customer_email,
                 invoice_number=invoice,
-                owner_id=user.id
+                user_id=user.id
             )
 
             items_out.append({
