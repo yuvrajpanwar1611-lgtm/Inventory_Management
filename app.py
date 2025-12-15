@@ -699,13 +699,15 @@ app = FastAPI(title="Inventory Management API")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "https://inventory-management-frontend-hqhs.onrender.com",
+        "https://inventory-management-frontend-hqhs.onrender.com"
     ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=[
+        "Authorization",
+        "Content-Type",
+        "Accept",
+    ],
 )
 
 @app.get("/")
