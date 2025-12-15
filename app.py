@@ -647,7 +647,6 @@
 
 
 
-
 # app.py
 import os
 import secrets
@@ -656,7 +655,7 @@ from typing import List, Optional
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
-from fastapi import FastAPI, HTTPException, Depends, Body, Request
+from fastapi import FastAPI, HTTPException, Depends, Body
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -688,7 +687,7 @@ logger = logging.getLogger("inventory")
 from models import (
     User, User_Pydantic,
     Supplier, supplier_pydantic, supplier_pydanticIn,
-    Products, product_pydanticIn,
+    Products, product_pydantic, product_pydanticIn,
     StockMovement
 )
 
@@ -708,11 +707,6 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
-# Preflight handler (IMPORTANT for OAuth + CORS)
-@app.options("/{path:path}")
-async def preflight_handler(path: str, request: Request):
-    return {}
 
 @app.get("/")
 def home():
@@ -752,11 +746,11 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 30
 pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/token")
 
-def hash_password(p: str):
-    return pwd_context.hash(p)
+def hash_password(raw: str):
+    return pwd_context.hash(raw)
 
-def verify_password(p: str, h: str):
-    return pwd_context.verify(p, h)
+def verify_password(raw: str, hashed: str):
+    return pwd_context.verify(raw, hashed)
 
 def create_access_token(data: dict):
     payload = data.copy()
@@ -791,7 +785,7 @@ class SignupSchema(BaseModel):
 @app.post("/signup")
 async def signup(data: SignupSchema):
     if await User.filter(username=data.username).exists():
-        raise HTTPException(400, "Username exists")
+        raise HTTPException(400, "Username already exists")
 
     user = await User.create(
         username=data.username,
@@ -812,6 +806,16 @@ async def login(form: OAuth2PasswordRequestForm = Depends()):
     token = create_access_token({"sub": str(user.id)})
     return {"access_token": token, "token_type": "bearer"}
 
+@app.get("/users/me")
+async def me(user: User = Depends(get_current_user)):
+    return {
+        "id": user.id,
+        "username": user.username,
+        "email": user.email,
+        "phone": user.phone,
+        "full_name": user.full_name
+    }
+
 # ======================================================
 # PRODUCT CRUD
 # ======================================================
@@ -830,36 +834,35 @@ async def add_product(
     d["net_profit"] = d.get("profit_per_piece", 0) * d.get("quantity_sold", 0)
 
     obj = await Products.create(**d, supplied_by=supplier, user_id=user.id)
-    return {"status": "ok", "data": obj.id}
+    return {"status": "ok", "data": await product_pydantic.from_tortoise_orm(obj)}
 
 @app.get("/product")
 async def get_products(user: User = Depends(get_current_user)):
-    products = await Products.filter(user_id=user.id)
-    return {
-        "status": "ok",
-        "data": [
-            {
-                "id": p.id,
-                "name": p.name,
-                "quantity_in_stock": p.quantity_in_stock,
-                "quantity_sold": p.quantity_sold,
-                "unit_price": str(p.unit_price),
-                "revenue": str(p.revenue),
-                "profit_per_piece": str(p.profit_per_piece),
-                "net_profit": str(p.net_profit),
-                "last_purchase_price": str(p.last_purchase_price),
-                "supplied_by_id": p.supplied_by_id,
-            }
-            for p in products
-        ],
-    }
+    products = await Products.filter(user_id=user.id).prefetch_related("supplied_by")
+
+    out = []
+    for p in products:
+        out.append({
+            "id": p.id,
+            "name": p.name,
+            "quantity_in_stock": p.quantity_in_stock,
+            "quantity_sold": p.quantity_sold,
+            "unit_price": str(p.unit_price),
+            "revenue": str(p.revenue),
+            "profit_per_piece": str(p.profit_per_piece),
+            "net_profit": str(p.net_profit),
+            "last_purchase_price": str(p.last_purchase_price),
+            "supplied_by_id": p.supplied_by_id,
+        })
+
+    return {"status": "ok", "data": out}
 
 # ======================================================
 # DATABASE
 # ======================================================
 DB_URL = os.getenv("DB_URL")
 if not DB_URL:
-    raise RuntimeError("DB_URL missing")
+    raise RuntimeError("❌ DB_URL missing in environment variables")
 
 register_tortoise(
     app,
@@ -869,4 +872,4 @@ register_tortoise(
     add_exception_handlers=True,
 )
 
-logger.info("✅ Inventory API started")
+logger.info("✅ Inventory API started successfully")
