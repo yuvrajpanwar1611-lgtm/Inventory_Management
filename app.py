@@ -716,7 +716,11 @@ if EMAIL and PASS:
 # ======================================================
 # AUTH / JWT
 # ======================================================
-SECRET_KEY = os.getenv("SECRET_KEY") or secrets.token_urlsafe(32)
+SECRET_KEY = os.getenv("SECRET_KEY")
+if not SECRET_KEY:
+    # Stable fallback to avoid invalidating tokens on every restart; override in production.
+    SECRET_KEY = "super_secret_key_change_me"
+    logger.warning("⚠️ SECRET_KEY not set — using insecure fallback (set SECRET_KEY in env!)")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 30
 
