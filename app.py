@@ -673,7 +673,7 @@ load_dotenv()
 
 # Import models
 from models import (
-    User, User_Pydantic, UserIn_Pydantic,
+    User, User_Pydantic, User_Pydantic,
     Supplier, supplier_pydantic, supplier_pydanticIn,
     Products, product_pydantic, product_pydanticIn,
     StockMovement
