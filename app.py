@@ -702,8 +702,10 @@ def home():
 EMAIL = os.getenv("EMAIL")
 PASS = os.getenv("PASS")
 
+
+
 if not EMAIL or not PASS:
-    raise Exception("❌ EMAIL or PASS not found in .env — Email sending cannot work!")
+    print("⚠️ EMAIL or PASS not set. Email service disabled.")
 
 MAIL_CONF = ConnectionConfig(
     MAIL_USERNAME=EMAIL,
