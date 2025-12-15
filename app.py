@@ -698,27 +698,27 @@ def home():
     return {"msg": "API Running"}
 
 
-# EMAIL CONFIG 
+# EMAIL CONFIG
 EMAIL = os.getenv("EMAIL")
 PASS = os.getenv("PASS")
 
+MAIL_CONF = None  # ✅ default safe value
 
-
-if not EMAIL or not PASS:
-    print("⚠️ EMAIL or PASS not set. Email service disabled.")
-
-MAIL_CONF = ConnectionConfig(
-    MAIL_USERNAME=EMAIL,
-    MAIL_PASSWORD=PASS,
-    MAIL_FROM=EMAIL,
-    MAIL_PORT=465,
-    MAIL_SERVER="smtp.gmail.com",
-    MAIL_SSL_TLS=True,
-    MAIL_STARTTLS=False,
-    USE_CREDENTIALS=True,
-    VALIDATE_CERTS=True
-)
-
+if EMAIL and PASS:
+    MAIL_CONF = ConnectionConfig(
+        MAIL_USERNAME=EMAIL,
+        MAIL_PASSWORD=PASS,
+        MAIL_FROM=EMAIL,
+        MAIL_PORT=465,
+        MAIL_SERVER="smtp.gmail.com",
+        MAIL_SSL_TLS=True,
+        MAIL_STARTTLS=False,
+        USE_CREDENTIALS=True,
+        VALIDATE_CERTS=True
+    )
+    print("✅ Email service enabled")
+else:
+    print("⚠️ Email service disabled (EMAIL or PASS missing)")
 
 #################   AUTH CONFIG (JWT)   ###########################
 SECRET_KEY = os.getenv("SECRET_KEY") or "super_secret_key"
